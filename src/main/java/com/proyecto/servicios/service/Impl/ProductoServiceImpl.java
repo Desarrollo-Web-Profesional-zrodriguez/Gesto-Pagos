@@ -27,7 +27,7 @@ public class ProductoServiceImpl implements ProductoService {
     }
 
     @Override 
-    public ProductListResponse  obtenerListaProdcutos(){
+    public ProductListResponse  obtenerListaProductos(){
         log.info("Iniciamos la invocación al servicio externo de catálogo de productos");
 
         // Validamos que exista el token
