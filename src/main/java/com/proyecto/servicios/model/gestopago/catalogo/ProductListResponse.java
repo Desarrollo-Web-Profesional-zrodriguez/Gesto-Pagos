@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.xml.bind.annotation.XmlAccessType;
 import jakarta.xml.bind.annotation.XmlAccessorType;
 import jakarta.xml.bind.annotation.XmlElement;
+import jakarta.xml.bind.annotation.XmlElementWrapper;
 import jakarta.xml.bind.annotation.XmlRootElement;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -19,21 +20,34 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
-@XmlRootElement(name = "productListResponse")
+@XmlRootElement(name = "RESPONSE")
 @XmlAccessorType(XmlAccessType.FIELD)
 public class ProductListResponse implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
     @JsonProperty("status")
-    @XmlElement(name = "status")
     private Integer status;
 
     @JsonProperty("message")
-    @XmlElement(name = "message")
     private String message;
 
-    @JsonProperty("productos")
+    @XmlElement(name = "MENSAJE")
+    private MensajeXml mensaje;
+
+    @XmlElementWrapper(name = "PRODUCTOS")
     @XmlElement(name = "producto")
+    @JsonProperty("productos")
     private List<ProductItemDto> productos;
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    public static class MensajeXml implements Serializable {
+        @XmlElement(name = "CODIGO")
+        private String codigo;
+        @XmlElement(name = "TEXTO")
+        private String texto;
+    }
 }
