@@ -41,6 +41,12 @@ class ProductoServiceImplTest {
     private GestoPagoProductClient productClient;
 
     /**
+     * Mock del servicio de gestión de tokens dinámicos de GestoPago.
+     */
+    @Mock
+    private GestoPagoTokenService tokenService;
+
+    /**
      * Instancia del servicio a probar en la que Mockito inyecta automáticamente los mocks declarados.
      */
     @InjectMocks
@@ -50,11 +56,11 @@ class ProductoServiceImplTest {
 
     /**
      * Configuración previa a la ejecución de cada prueba.
-     * Simula la inyección de la propiedad {@code @Value("${gestopago.service.token}")}.
+     * Simula la provisión del token dinámico válido.
      */
     @BeforeEach
     void setUp() {
-        ReflectionTestUtils.setField(productoService, "tokenConfigurado", DUMMY_TOKEN);
+        org.mockito.Mockito.lenient().when(tokenService.obtenerTokenValido()).thenReturn(DUMMY_TOKEN);
     }
 
     /**
@@ -108,14 +114,14 @@ class ProductoServiceImplTest {
 
     /**
      * Prueba el flujo de validación del token de autenticación:
-     * Si la propiedad {@code gestopago.service.token} está vacía o nula,
+     * Si el servicio de tokens no retorna un token disponible o este es nulo/vacío,
      * el servicio debe retornar status 401 inmediatamente sin llamar al cliente externo.
      */
     @Test
-    @DisplayName("Debe retornar status 401 cuando el token no está configurado")
-    void testObtenerListaProductos_TokenNoConfigurado() {
-        // Given: Modificamos el valor de la propiedad para simular que no está configurada
-        ReflectionTestUtils.setField(productoService, "tokenConfigurado", "");
+    @DisplayName("Debe retornar status 401 cuando el token dinámico no está disponible")
+    void testObtenerListaProductos_TokenNoDisponible() {
+        // Given: El servicio de tokens no retorna un token disponible
+        when(tokenService.obtenerTokenValido()).thenReturn(null);
 
         // When
         ProductListResponse result = productoService.obtenerListaProductos();
@@ -123,8 +129,65 @@ class ProductoServiceImplTest {
         // Then
         assertNotNull(result);
         assertEquals(401, result.getStatus(), "Debe responder con 401 si falta el token");
-        assertEquals("Token de autenticacion no configurado", result.getMessage());
+        assertEquals("Token de autenticacion no disponible", result.getMessage());
         assertTrue(result.getProductos().isEmpty(), "La lista de productos debe estar vacía");
+    }
+
+    /**
+     * Prueba la recuperación automática ante expiración del token (HTTP 403 / 401):
+     * Simula que la primera llamada falla con 403 Forbidden (token expirado),
+     * el servicio fuerza la renovación del token y reintenta con éxito.
+     */
+    @Test
+    @DisplayName("Debe renovar token y reintentar exitosamente cuando el servicio responde 403 por token expirado")
+    void testObtenerListaProductos_TokenExpirado403_RenuevaYReintentaExitoso() {
+        String tokenNuevo = "nuevo_token_dinamico_renovado_789";
+        String xmlMock = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <RESPONSE>
+                <MENSAJE>
+                    <CODIGO>01</CODIGO>
+                    <TEXTO>Operacion realizada con exito</TEXTO>
+                </MENSAJE>
+                <PRODUCTOS>
+                    <producto servicio="ABIB" producto="ABIB 100" idServicio="2284" idProducto="14302" idCatTipoServicio="13" tipoFront="1" hasDigitoVerificador="false" precio="100.0" showAyuda="false" tipoReferencia="a">
+                        <legend><![CDATA[Recibe soporte las 24h marcando al *787]]></legend>
+                    </producto>
+                </PRODUCTOS>
+            </RESPONSE>
+            """;
+
+        Request mockRequest = Request.create(
+                Request.HttpMethod.GET,
+                "/sistema/service/getProductList.do",
+                new HashMap<>(),
+                Request.Body.empty(),
+                new RequestTemplate()
+        );
+
+        FeignException forbiddenException = new FeignException.Forbidden(
+                "Forbidden",
+                mockRequest,
+                null,
+                new HashMap<>()
+        );
+
+        // Primer llamada con token viejo falla con 403, tras renovar retorna tokenNuevo y la segunda llamada es exitosa
+        when(productClient.getProductList("Bearer " + DUMMY_TOKEN)).thenThrow(forbiddenException);
+        when(tokenService.obtenerTokenValido()).thenReturn(DUMMY_TOKEN, tokenNuevo);
+        when(productClient.getProductList("Bearer " + tokenNuevo)).thenReturn(xmlMock);
+
+        // When
+        ProductListResponse result = productoService.obtenerListaProductos();
+
+        // Then
+        assertNotNull(result);
+        assertEquals(200, result.getStatus());
+        assertEquals("Operacion realizada con exito", result.getMessage());
+        assertEquals(1, result.getProductos().size());
+
+        verify(tokenService).renovarToken();
+        verify(productClient).getProductList("Bearer " + tokenNuevo);
     }
 
     /**
