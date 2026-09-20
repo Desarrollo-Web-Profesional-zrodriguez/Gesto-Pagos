@@ -7,6 +7,11 @@ import feign.FeignException;
 import feign.Request;
 import feign.RequestTemplate;
 import feign.RetryableException;
+import com.proyecto.servicios.entity.gestopago.GestoPagoProducto;
+import com.proyecto.servicios.mapper.GestoPagoProductoMapper;
+import com.proyecto.servicios.model.gestopago.catalogo.ProductCategorizedResponse;
+import com.proyecto.servicios.model.gestopago.catalogo.ProductItemDto;
+import com.proyecto.servicios.repositorys.gestopago.GestoPagoProductoRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -14,14 +19,19 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -46,6 +56,18 @@ class ProductoServiceImplTest {
     @Mock
     private GestoPagoTokenService tokenService;
 
+    @Mock
+    private RedisTemplate<String, Object> redisTemplate;
+
+    @Mock
+    private ValueOperations<String, Object> valueOperations;
+
+    @Mock
+    private GestoPagoProductoRepository productoRepository;
+
+    @Mock
+    private GestoPagoProductoMapper productoMapper;
+
     /**
      * Instancia del servicio a probar en la que Mockito inyecta automáticamente los mocks declarados.
      */
@@ -53,14 +75,16 @@ class ProductoServiceImplTest {
     private ProductoServiceImpl productoService;
 
     private static final String DUMMY_TOKEN = "mi_token_secreto_123";
+    private static final String REDIS_KEY = "gestopago:catalogo:productos_por_tipo_front";
 
     /**
      * Configuración previa a la ejecución de cada prueba.
-     * Simula la provisión del token dinámico válido.
+     * Simula la provisión del token dinámico válido y la clave de Redis.
      */
     @BeforeEach
     void setUp() {
-        org.mockito.Mockito.lenient().when(tokenService.obtenerTokenValido()).thenReturn(DUMMY_TOKEN);
+        lenient().when(tokenService.obtenerTokenValido()).thenReturn(DUMMY_TOKEN);
+        ReflectionTestUtils.setField(productoService, "redisKey", REDIS_KEY);
     }
 
     /**
@@ -320,5 +344,71 @@ class ProductoServiceImplTest {
         assertEquals(500, result.getStatus(), "Debe retornar 500 por error interno de parseo");
         assertEquals("Error interno al procesar la lista de productos", result.getMessage());
         assertTrue(result.getProductos().isEmpty());
+    }
+
+    @Test
+    @DisplayName("Debe retornar productos categorizados desde Redis cuando la cache está disponible")
+    void testObtenerProductosCategorizados_ExitosoDesdeRedis() {
+        ProductItemDto item = ProductItemDto.builder()
+                .idProducto(101L)
+                .producto("Recarga 100")
+                .tipoFront(1)
+                .build();
+        Map<Integer, List<ProductItemDto>> mockCategorias = Map.of(1, List.of(item));
+
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get(REDIS_KEY)).thenReturn(mockCategorias);
+
+        ProductCategorizedResponse result = productoService.obtenerProductosCategorizados();
+
+        assertNotNull(result);
+        assertEquals(200, result.getStatus());
+        assertEquals("REDIS", result.getOrigen());
+        assertEquals(1, result.getTotalProductos());
+        assertTrue(result.getCategorias().containsKey(1));
+    }
+
+    @Test
+    @DisplayName("Debe hacer fallback a PostgreSQL cuando Redis falla o no tiene datos")
+    void testObtenerProductosCategorizados_FallbackPostgresql() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get(REDIS_KEY)).thenThrow(new RuntimeException("Redis connection refused"));
+
+        GestoPagoProducto entidad = GestoPagoProducto.builder()
+                .idProducto(202L)
+                .producto("Servicio Luz")
+                .tipoFront(2)
+                .build();
+        ProductItemDto dto = ProductItemDto.builder()
+                .idProducto(202L)
+                .producto("Servicio Luz")
+                .tipoFront(2)
+                .build();
+
+        when(productoRepository.findAllByOrderByTipoFrontAscIdProductoAsc()).thenReturn(List.of(entidad));
+        when(productoMapper.toDtoList(List.of(entidad))).thenReturn(List.of(dto));
+
+        ProductCategorizedResponse result = productoService.obtenerProductosCategorizados();
+
+        assertNotNull(result);
+        assertEquals(200, result.getStatus());
+        assertEquals("POSTGRESQL", result.getOrigen());
+        assertEquals(1, result.getTotalProductos());
+        assertTrue(result.getCategorias().containsKey(2));
+    }
+
+    @Test
+    @DisplayName("Debe retornar 404 cuando no hay datos en Redis ni en PostgreSQL")
+    void testObtenerProductosCategorizados_VacioRetorna404() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get(REDIS_KEY)).thenReturn(null);
+        when(productoRepository.findAllByOrderByTipoFrontAscIdProductoAsc()).thenReturn(List.of());
+
+        ProductCategorizedResponse result = productoService.obtenerProductosCategorizados();
+
+        assertNotNull(result);
+        assertEquals(404, result.getStatus());
+        assertEquals("NINGUNO", result.getOrigen());
+        assertEquals(0, result.getTotalProductos());
     }
 }
