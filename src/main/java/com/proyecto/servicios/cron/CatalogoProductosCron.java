@@ -14,6 +14,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -63,10 +65,28 @@ public class CatalogoProductosCron {
             return;
         }
 
-        log.info("GestoPago respondió 200 OK con {} productos. Categorizando por tipoFront...", productos.size());
+        log.info("GestoPago respondió 200 OK con {} productos. Normalizando categoría 0 y ordenando de menor a mayor...", productos.size());
 
-        // Vategorizar por tipoFront
-        Map<Integer, List<ProductItemDto>> productosPorTipoFront = productos.stream().collect(Collectors.groupingBy(p -> p.getTipoFront() != null ? p.getTipoFront() : 0));
+        // 1. Si no tiene categoría (tipoFront == null), asignar categoría 0
+        productos.forEach(p -> {
+            if (p.getTipoFront() == null) {
+                p.setTipoFront(0);
+            }
+        });
+
+        // 2. Ordenar de menor a mayor: primero por tipoFront (0, 1, 2...) y luego por idProducto
+        productos.sort(Comparator
+                .comparing(ProductItemDto::getTipoFront)
+                .thenComparing(ProductItemDto::getIdProducto, Comparator.nullsLast(Comparator.naturalOrder()))
+        );
+
+        // 3. Agrupar conservando el orden de menor a mayor (LinkedHashMap)
+        Map<Integer, List<ProductItemDto>> productosPorTipoFront = productos.stream()
+                .collect(Collectors.groupingBy(
+                        ProductItemDto::getTipoFront,
+                        LinkedHashMap::new,
+                        Collectors.toList()
+                ));
 
         boolean guardadoEnRedisExistoso = false;
 

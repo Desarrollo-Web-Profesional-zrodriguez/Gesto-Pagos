@@ -21,8 +21,10 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import java.io.StringReader;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 @Service
@@ -113,15 +115,17 @@ public class ProductoServiceImpl implements ProductoService {
                 );
 
                 if (!categorias.isEmpty()) {
-                    int total = categorias.values().stream().mapToInt(List::size).sum();
+                    // Garantizar orden de menor a mayor en las categorías (0, 1, 2...)
+                    Map<Integer, List<ProductItemDto>> categoriasOrdenadas = new TreeMap<>(categorias);
+                    int total = categoriasOrdenadas.values().stream().mapToInt(List::size).sum();
 
                     return ProductCategorizedResponse.builder()
-                    .status(200)
-                    .message("Catálogo obtenido exitosamente")
-                    .origen("REDIS")
-                    .totalProductos(total)
-                    .categorias(categorias)
-                    .build();
+                            .status(200)
+                            .message("Catálogo obtenido exitosamente")
+                            .origen("REDIS")
+                            .totalProductos(total)
+                            .categorias(categoriasOrdenadas)
+                            .build();
                 }
             }
         } catch (Exception e) {
@@ -135,16 +139,29 @@ public class ProductoServiceImpl implements ProductoService {
         if (productosBD != null && !productosBD.isEmpty()) {
             // Usamos MapStruct para convertir de Entidad a DTO
             List<ProductItemDto> dtos = productoMapper.toDtoList(productosBD);
-            // Agrupamos por tipoFront
-            Map<Integer, List<ProductItemDto>> categoriasBD = dtos.stream().collect(Collectors.groupingBy(p -> p.getTipoFront() != null ? p.getTipoFront() : 0));
+
+            // Normalizar categoría 0 si viene sin tipoFront
+            dtos.forEach(p -> {
+                if (p.getTipoFront() == null) {
+                    p.setTipoFront(0);
+                }
+            });
+
+            // Agrupamos por tipoFront conservando el orden de menor a mayor
+            Map<Integer, List<ProductItemDto>> categoriasBD = dtos.stream()
+                    .collect(Collectors.groupingBy(
+                            ProductItemDto::getTipoFront,
+                            LinkedHashMap::new,
+                            Collectors.toList()
+                    ));
 
             return ProductCategorizedResponse.builder()
-            .status(200)
-            .message("Catálogo obtenido exitosamente desde base de datos")
-            .origen("POSTGRESQL")
-            .totalProductos(productosBD.size())
-            .categorias(categoriasBD)
-            .build();
+                    .status(200)
+                    .message("Catálogo obtenido exitosamente desde base de datos")
+                    .origen("POSTGRESQL")
+                    .totalProductos(productosBD.size())
+                    .categorias(categoriasBD)
+                    .build();
         }
 
         // Si ni en Redis ni en BD hay datos
