@@ -7,6 +7,11 @@ import feign.FeignException;
 import feign.Request;
 import feign.RequestTemplate;
 import feign.RetryableException;
+import com.proyecto.servicios.entity.gestopago.GestoPagoProducto;
+import com.proyecto.servicios.mapper.GestoPagoProductoMapper;
+import com.proyecto.servicios.model.gestopago.catalogo.ProductCategorizedResponse;
+import com.proyecto.servicios.model.gestopago.catalogo.ProductItemDto;
+import com.proyecto.servicios.repositorys.gestopago.GestoPagoProductoRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -14,14 +19,19 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -41,20 +51,40 @@ class ProductoServiceImplTest {
     private GestoPagoProductClient productClient;
 
     /**
+     * Mock del servicio de gestión de tokens dinámicos de GestoPago.
+     */
+    @Mock
+    private GestoPagoTokenService tokenService;
+
+    @Mock
+    private RedisTemplate<String, Object> redisTemplate;
+
+    @Mock
+    private ValueOperations<String, Object> valueOperations;
+
+    @Mock
+    private GestoPagoProductoRepository productoRepository;
+
+    @Mock
+    private GestoPagoProductoMapper productoMapper;
+
+    /**
      * Instancia del servicio a probar en la que Mockito inyecta automáticamente los mocks declarados.
      */
     @InjectMocks
     private ProductoServiceImpl productoService;
 
     private static final String DUMMY_TOKEN = "mi_token_secreto_123";
+    private static final String REDIS_KEY = "gestopago:catalogo:productos_por_tipo_front";
 
     /**
      * Configuración previa a la ejecución de cada prueba.
-     * Simula la inyección de la propiedad {@code @Value("${gestopago.service.token}")}.
+     * Simula la provisión del token dinámico válido y la clave de Redis.
      */
     @BeforeEach
     void setUp() {
-        ReflectionTestUtils.setField(productoService, "tokenConfigurado", DUMMY_TOKEN);
+        lenient().when(tokenService.obtenerTokenValido()).thenReturn(DUMMY_TOKEN);
+        ReflectionTestUtils.setField(productoService, "redisKey", REDIS_KEY);
     }
 
     /**
@@ -108,14 +138,14 @@ class ProductoServiceImplTest {
 
     /**
      * Prueba el flujo de validación del token de autenticación:
-     * Si la propiedad {@code gestopago.service.token} está vacía o nula,
+     * Si el servicio de tokens no retorna un token disponible o este es nulo/vacío,
      * el servicio debe retornar status 401 inmediatamente sin llamar al cliente externo.
      */
     @Test
-    @DisplayName("Debe retornar status 401 cuando el token no está configurado")
-    void testObtenerListaProductos_TokenNoConfigurado() {
-        // Given: Modificamos el valor de la propiedad para simular que no está configurada
-        ReflectionTestUtils.setField(productoService, "tokenConfigurado", "");
+    @DisplayName("Debe retornar status 401 cuando el token dinámico no está disponible")
+    void testObtenerListaProductos_TokenNoDisponible() {
+        // Given: El servicio de tokens no retorna un token disponible
+        when(tokenService.obtenerTokenValido()).thenReturn(null);
 
         // When
         ProductListResponse result = productoService.obtenerListaProductos();
@@ -123,8 +153,65 @@ class ProductoServiceImplTest {
         // Then
         assertNotNull(result);
         assertEquals(401, result.getStatus(), "Debe responder con 401 si falta el token");
-        assertEquals("Token de autenticacion no configurado", result.getMessage());
+        assertEquals("Token de autenticacion no disponible", result.getMessage());
         assertTrue(result.getProductos().isEmpty(), "La lista de productos debe estar vacía");
+    }
+
+    /**
+     * Prueba la recuperación automática ante expiración del token (HTTP 403 / 401):
+     * Simula que la primera llamada falla con 403 Forbidden (token expirado),
+     * el servicio fuerza la renovación del token y reintenta con éxito.
+     */
+    @Test
+    @DisplayName("Debe renovar token y reintentar exitosamente cuando el servicio responde 403 por token expirado")
+    void testObtenerListaProductos_TokenExpirado403_RenuevaYReintentaExitoso() {
+        String tokenNuevo = "nuevo_token_dinamico_renovado_789";
+        String xmlMock = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <RESPONSE>
+                <MENSAJE>
+                    <CODIGO>01</CODIGO>
+                    <TEXTO>Operacion realizada con exito</TEXTO>
+                </MENSAJE>
+                <PRODUCTOS>
+                    <producto servicio="ABIB" producto="ABIB 100" idServicio="2284" idProducto="14302" idCatTipoServicio="13" tipoFront="1" hasDigitoVerificador="false" precio="100.0" showAyuda="false" tipoReferencia="a">
+                        <legend><![CDATA[Recibe soporte las 24h marcando al *787]]></legend>
+                    </producto>
+                </PRODUCTOS>
+            </RESPONSE>
+            """;
+
+        Request mockRequest = Request.create(
+                Request.HttpMethod.GET,
+                "/sistema/service/getProductList.do",
+                new HashMap<>(),
+                Request.Body.empty(),
+                new RequestTemplate()
+        );
+
+        FeignException forbiddenException = new FeignException.Forbidden(
+                "Forbidden",
+                mockRequest,
+                null,
+                new HashMap<>()
+        );
+
+        // Primer llamada con token viejo falla con 403, tras renovar retorna tokenNuevo y la segunda llamada es exitosa
+        when(productClient.getProductList("Bearer " + DUMMY_TOKEN)).thenThrow(forbiddenException);
+        when(tokenService.obtenerTokenValido()).thenReturn(DUMMY_TOKEN, tokenNuevo);
+        when(productClient.getProductList("Bearer " + tokenNuevo)).thenReturn(xmlMock);
+
+        // When
+        ProductListResponse result = productoService.obtenerListaProductos();
+
+        // Then
+        assertNotNull(result);
+        assertEquals(200, result.getStatus());
+        assertEquals("Operacion realizada con exito", result.getMessage());
+        assertEquals(1, result.getProductos().size());
+
+        verify(tokenService).renovarToken();
+        verify(productClient).getProductList("Bearer " + tokenNuevo);
     }
 
     /**
@@ -257,5 +344,71 @@ class ProductoServiceImplTest {
         assertEquals(500, result.getStatus(), "Debe retornar 500 por error interno de parseo");
         assertEquals("Error interno al procesar la lista de productos", result.getMessage());
         assertTrue(result.getProductos().isEmpty());
+    }
+
+    @Test
+    @DisplayName("Debe retornar productos categorizados desde Redis cuando la cache está disponible")
+    void testObtenerProductosCategorizados_ExitosoDesdeRedis() {
+        ProductItemDto item = ProductItemDto.builder()
+                .idProducto(101L)
+                .producto("Recarga 100")
+                .tipoFront(1)
+                .build();
+        Map<Integer, List<ProductItemDto>> mockCategorias = Map.of(1, List.of(item));
+
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get(REDIS_KEY)).thenReturn(mockCategorias);
+
+        ProductCategorizedResponse result = productoService.obtenerProductosCategorizados();
+
+        assertNotNull(result);
+        assertEquals(200, result.getStatus());
+        assertEquals("REDIS", result.getOrigen());
+        assertEquals(1, result.getTotalProductos());
+        assertTrue(result.getCategorias().containsKey(1));
+    }
+
+    @Test
+    @DisplayName("Debe hacer fallback a PostgreSQL cuando Redis falla o no tiene datos")
+    void testObtenerProductosCategorizados_FallbackPostgresql() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get(REDIS_KEY)).thenThrow(new RuntimeException("Redis connection refused"));
+
+        GestoPagoProducto entidad = GestoPagoProducto.builder()
+                .idProducto(202L)
+                .producto("Servicio Luz")
+                .tipoFront(2)
+                .build();
+        ProductItemDto dto = ProductItemDto.builder()
+                .idProducto(202L)
+                .producto("Servicio Luz")
+                .tipoFront(2)
+                .build();
+
+        when(productoRepository.findAllByOrderByTipoFrontAscIdProductoAsc()).thenReturn(List.of(entidad));
+        when(productoMapper.toDtoList(List.of(entidad))).thenReturn(List.of(dto));
+
+        ProductCategorizedResponse result = productoService.obtenerProductosCategorizados();
+
+        assertNotNull(result);
+        assertEquals(200, result.getStatus());
+        assertEquals("POSTGRESQL", result.getOrigen());
+        assertEquals(1, result.getTotalProductos());
+        assertTrue(result.getCategorias().containsKey(2));
+    }
+
+    @Test
+    @DisplayName("Debe retornar 404 cuando no hay datos en Redis ni en PostgreSQL")
+    void testObtenerProductosCategorizados_VacioRetorna404() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get(REDIS_KEY)).thenReturn(null);
+        when(productoRepository.findAllByOrderByTipoFrontAscIdProductoAsc()).thenReturn(List.of());
+
+        ProductCategorizedResponse result = productoService.obtenerProductosCategorizados();
+
+        assertNotNull(result);
+        assertEquals(404, result.getStatus());
+        assertEquals("NINGUNO", result.getOrigen());
+        assertEquals(0, result.getTotalProductos());
     }
 }
