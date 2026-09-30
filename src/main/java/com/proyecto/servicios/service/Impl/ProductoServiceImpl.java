@@ -73,24 +73,28 @@ public class ProductoServiceImpl implements ProductoService {
         }
 
         try {
+            return ejecutarConsultaConReintento(token);
+        } catch (Exception e) {
+            return manejarExcepcion(e);
+        }
+    }
+
+    /**
+     * Realiza la consulta HTTP y, si el token expiro (401 o 403), renueva y reintenta una vez de forma directa.
+     */
+    private ProductListResponse ejecutarConsultaConReintento(String token) throws Exception {
+        try {
             return consultarProductosConToken(token);
         } catch (FeignException e) {
-            // Si el token expiro (401 o 403), forzamos renovacion inmediata y reintentamos 1 vez
             if (e.status() == 401 || e.status() == 403) {
-                log.warn("El servicio externo respondio HTTP {}. Renovando token y reintentando...", e.status());
+                log.warn("[obtenerListaProductos]: Token expirado o rechazado (HTTP {}). Renovando token y reintentando...", e.status());
                 tokenService.renovarToken();
                 String nuevoToken = tokenService.obtenerTokenValido();
                 if (nuevoToken != null && !nuevoToken.equals(token)) {
-                    try {
-                        return consultarProductosConToken(nuevoToken);
-                    } catch (Exception retryEx) {
-                        return manejarExcepcion(retryEx);
-                    }
+                    return consultarProductosConToken(nuevoToken);
                 }
             }
-            return manejarExcepcion(e);
-        } catch (Exception e) {
-            return manejarExcepcion(e);
+            throw e;
         }
     }
 
@@ -202,29 +206,26 @@ public class ProductoServiceImpl implements ProductoService {
     }
 
     private ProductListResponse manejarExcepcion(Exception e) {
+        log.error("[obtenerListaProductos]: Ha ocurrido un error al consultar el catalogo externo", e);
         if (e instanceof RetryableException) {
-            log.error("Error de timeout o comunicacion con el servicio externo de productos: {}", e.getMessage());
             return ProductListResponse.builder()
                     .status(504)
                     .message("Tiempo de espera agotado al conectar con el servicio externo")
                     .productos(Collections.emptyList())
                     .build();
         } else if (e instanceof FeignException.Unauthorized) {
-            log.error("Error de autenticacion (401) con el servicio externo.");
             return ProductListResponse.builder()
                     .status(401)
                     .message("Error de autenticacion con el proveedor externo")
                     .productos(Collections.emptyList())
                     .build();
         } else if (e instanceof FeignException fe) {
-            log.error("Respuesta no exitosa del servicio externo de productos. HTTP Status: {}", fe.status());
             return ProductListResponse.builder()
                     .status(fe.status())
                     .message("El servicio externo respondio con error HTTP " + fe.status())
                     .productos(Collections.emptyList())
                     .build();
         } else {
-            log.error("Error inesperado durante la consulta de productos: {}", e.getMessage(), e);
             return ProductListResponse.builder()
                     .status(500)
                     .message("Error interno al procesar la lista de productos")
