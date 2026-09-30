@@ -2,7 +2,7 @@
 
 ## 1. Documento Técnico Oficial
 > 📄 **Enlace al Documento Técnico:**  
-> [Documento Técnico en Word](https://drive.google.com/file/d/1Amqv0GMp_M2kMNHbXpml_NQJIPlfUq8K/view?usp=sharing)
+> [Documento Técnico](https://drive.google.com/file/d/1Amqv0GMp_M2kMNHbXpml_NQJIPlfUq8K/view?usp=sharing)
 
 ---
 
