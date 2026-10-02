@@ -8,6 +8,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -99,7 +101,22 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
     }
 
-    // 6. Excepción Genérica Inesperada -> HTTP 500
+    // 6. Parámetros o cabeceras requeridas faltantes -> HTTP 400
+    @ExceptionHandler({MissingRequestHeaderException.class, MissingServletRequestParameterException.class})
+    public ResponseEntity<ErrorResponse> manejarFaltantes(Exception ex, HttpServletRequest request) {
+        ErrorResponse response = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.BAD_REQUEST.value())
+                .error("Parametro o cabecera requerida faltante")
+                .mensaje(ex.getMessage())
+                .path(request.getRequestURI())
+                .build();
+
+        log.warn("[ParametroFaltante]: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+    }
+
+    // 7. Excepción Genérica Inesperada -> HTTP 500
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> manejarGenerico(Exception ex, HttpServletRequest request) {
         ErrorResponse response = ErrorResponse.builder()
