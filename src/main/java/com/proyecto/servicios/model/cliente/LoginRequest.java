@@ -2,6 +2,7 @@ package com.proyecto.servicios.model.cliente;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -16,8 +17,9 @@ import lombok.Setter;
 @Schema(description = "Solicitud de inicio de sesion (Login)")
 public class LoginRequest {
 
-    @NotBlank(message = "El usuario o correo es obligatorio")
-    @Schema(description = "Nombre de usuario o correo electronico", example = "juan.perez@example.com")
+    @NotBlank(message = "El correo electronico es obligatorio")
+    @Pattern(regexp = "^[a-zA-Z0-9_!#$%&'*+/=?`{|}~^.-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$", message = "El formato del correo electronico no es valido (ejemplo: usuario@dominio.com)")
+    @Schema(description = "Correo electronico del usuario", example = "juan.perez@example.com")
     private String username;
 
     // Opcional si el acceso se realiza por biometría facial directa

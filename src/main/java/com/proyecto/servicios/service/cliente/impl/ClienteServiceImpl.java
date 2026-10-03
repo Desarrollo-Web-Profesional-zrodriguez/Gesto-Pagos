@@ -26,9 +26,11 @@ import com.proyecto.servicios.model.cliente.ClienteResponse;
 import com.proyecto.servicios.model.cliente.CuentaResponse;
 import com.proyecto.servicios.model.cliente.DomicilioDto;
 import com.proyecto.servicios.model.cliente.SaldoResponse;
+import com.proyecto.servicios.entity.cliente.Nacionalidad;
 import com.proyecto.servicios.repositorys.cliente.ClienteRepository;
 import com.proyecto.servicios.repositorys.cliente.CuentaRepository;
 import com.proyecto.servicios.repositorys.cliente.DomicilioRepository;
+import com.proyecto.servicios.repositorys.cliente.NacionalidadRepository;
 import com.proyecto.servicios.repositorys.cliente.SaldoRepository;
 import com.proyecto.servicios.repositorys.cliente.UsuarioLoginRepository;
 import com.proyecto.servicios.service.cliente.ClienteService;
@@ -47,6 +49,7 @@ public class ClienteServiceImpl implements ClienteService {
     private final CuentaRepository cuentaRepository;
     private final SaldoRepository saldoRepository;
     private final UsuarioLoginRepository usuarioLoginRepository;
+    private final NacionalidadRepository nacionalidadRepository;
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
@@ -62,7 +65,8 @@ public class ClienteServiceImpl implements ClienteService {
         validarUnicidad(request.getCurp(), request.getRfc(), request.getCorreoElectronico(), null);
 
         // 3. Crear y Persistir Cliente
-        Double ingreso = (request.getIngresoMensual() != null) ? request.getIngresoMensual() : 0.0;
+        Nacionalidad nac = resolverNacionalidad(request.getIdNacionalidad(), request.getNacionalidad());
+        Double ingreso = (request.getIngresoMensual() != null) ? request.getIngresoMensual().doubleValue() : 0.0;
         Cliente cliente = Cliente.builder()
                 .nombre(request.getNombre().trim())
                 .segundoNombre(request.getSegundoNombre() != null ? request.getSegundoNombre().trim() : null)
@@ -72,7 +76,8 @@ public class ClienteServiceImpl implements ClienteService {
                 .curp(request.getCurp().trim().toUpperCase())
                 .rfc(request.getRfc().trim().toUpperCase())
                 .sexo(request.getSexo().trim().toUpperCase())
-                .nacionalidad(request.getNacionalidad().trim())
+                .idNacionalidad(nac.getIdNacionalidad())
+                .nacionalidad(nac.getGentilicio())
                 .estadoCivil(request.getEstadoCivil().trim())
                 .correoElectronico(request.getCorreoElectronico().trim().toLowerCase())
                 .telefonoMovil(request.getTelefonoMovil().trim())
@@ -112,8 +117,8 @@ public class ClienteServiceImpl implements ClienteService {
         Cuenta cuentaGuardada = cuentaRepository.save(cuenta);
 
         // 6. Asignar Saldo Inicial
-        Double saldoInicial = (request.getSaldoInicial() != null && request.getSaldoInicial() >= 0.0) 
-                ? request.getSaldoInicial() : 0.0;
+        Double saldoInicial = (request.getSaldoInicial() != null && request.getSaldoInicial().doubleValue() >= 0.0) 
+                ? request.getSaldoInicial().doubleValue() : 0.0;
         Saldo saldo = Saldo.builder()
                 .cuenta(cuentaGuardada)
                 .saldoDisponible(saldoInicial)
@@ -175,7 +180,7 @@ public class ClienteServiceImpl implements ClienteService {
     @Transactional(readOnly = true)
     public ClienteResponse obtenerPorCorreo(String correo) {
         Cliente cliente = clienteRepository.findByCorreoElectronico(correo.trim().toLowerCase())
-                .orElseThrow(() -> new ClienteNoEncontradoException("No se encontro cliente con el correo: " + correo));
+                .orElseThrow(() -> new ClienteNoEncontradoException("El correo electronico no existe: " + correo));
         return mapearAClienteResponse(cliente);
     }
 
@@ -233,13 +238,15 @@ public class ClienteServiceImpl implements ClienteService {
         cliente.setApellidoMaterno(request.getApellidoMaterno().trim());
         cliente.setFechaNacimiento(request.getFechaNacimiento());
         cliente.setSexo(request.getSexo().trim().toUpperCase());
-        cliente.setNacionalidad(request.getNacionalidad().trim());
+        Nacionalidad nacActualizada = resolverNacionalidad(request.getIdNacionalidad(), request.getNacionalidad());
+        cliente.setIdNacionalidad(nacActualizada.getIdNacionalidad());
+        cliente.setNacionalidad(nacActualizada.getGentilicio());
         cliente.setEstadoCivil(request.getEstadoCivil().trim());
         cliente.setTelefonoMovil(request.getTelefonoMovil().trim());
         cliente.setTelefonoAlternativo(request.getTelefonoAlternativo() != null ? request.getTelefonoAlternativo().trim() : null);
         cliente.setOcupacion(request.getOcupacion().trim());
         cliente.setEmpresa(request.getEmpresa().trim());
-        cliente.setIngresoMensual(request.getIngresoMensual());
+        cliente.setIngresoMensual(request.getIngresoMensual().doubleValue());
 
         // Actualizar Domicilio
         if (request.getDomicilio() != null && !cliente.getDomicilios().isEmpty()) {
@@ -273,7 +280,11 @@ public class ClienteServiceImpl implements ClienteService {
             cliente.setFechaNacimiento(request.getFechaNacimiento());
         }
         if (request.getSexo() != null) cliente.setSexo(request.getSexo().trim().toUpperCase());
-        if (request.getNacionalidad() != null) cliente.setNacionalidad(request.getNacionalidad().trim());
+        if (request.getIdNacionalidad() != null || (request.getNacionalidad() != null && !request.getNacionalidad().trim().isEmpty())) {
+            Nacionalidad nacPatch = resolverNacionalidad(request.getIdNacionalidad(), request.getNacionalidad());
+            cliente.setIdNacionalidad(nacPatch.getIdNacionalidad());
+            cliente.setNacionalidad(nacPatch.getGentilicio());
+        }
         if (request.getEstadoCivil() != null) cliente.setEstadoCivil(request.getEstadoCivil().trim());
 
         if (request.getCorreoElectronico() != null && !request.getCorreoElectronico().equalsIgnoreCase(cliente.getCorreoElectronico())) {
@@ -285,7 +296,7 @@ public class ClienteServiceImpl implements ClienteService {
         if (request.getTelefonoAlternativo() != null) cliente.setTelefonoAlternativo(request.getTelefonoAlternativo().trim());
         if (request.getOcupacion() != null) cliente.setOcupacion(request.getOcupacion().trim());
         if (request.getEmpresa() != null) cliente.setEmpresa(request.getEmpresa().trim());
-        if (request.getIngresoMensual() != null) cliente.setIngresoMensual(request.getIngresoMensual());
+        if (request.getIngresoMensual() != null) cliente.setIngresoMensual(request.getIngresoMensual().doubleValue());
 
         if (request.getActivo() != null) {
             cliente.setActivo(request.getActivo());
@@ -427,6 +438,7 @@ public class ClienteServiceImpl implements ClienteService {
                 .curp(c.getCurp())
                 .rfc(c.getRfc())
                 .sexo(c.getSexo())
+                .idNacionalidad(c.getIdNacionalidad())
                 .nacionalidad(c.getNacionalidad())
                 .estadoCivil(c.getEstadoCivil())
                 .correoElectronico(c.getCorreoElectronico())
@@ -441,5 +453,25 @@ public class ClienteServiceImpl implements ClienteService {
                 .domicilios(domDtos)
                 .cuentas(cuentaResponses)
                 .build();
+    }
+
+    private Nacionalidad resolverNacionalidad(Long idNacionalidad, String nombreNacionalidad) {
+        if (idNacionalidad != null) {
+            return nacionalidadRepository.findById(idNacionalidad)
+                    .orElseThrow(() -> new ReglaNegocioException("La nacionalidad con ID " + idNacionalidad + " no existe en el catalogo de la base de datos"));
+        }
+        if (nombreNacionalidad != null && !nombreNacionalidad.trim().isEmpty()) {
+            String nombreLimpio = nombreNacionalidad.trim();
+            if (nombreLimpio.matches("^\\d+$")) {
+                Long id = Long.parseLong(nombreLimpio);
+                return nacionalidadRepository.findById(id)
+                        .orElseThrow(() -> new ReglaNegocioException("La nacionalidad con ID " + id + " no existe en el catalogo de la base de datos"));
+            }
+            return nacionalidadRepository.findByGentilicioIgnoreCase(nombreLimpio)
+                    .or(() -> nacionalidadRepository.findByPaisIgnoreCase(nombreLimpio))
+                    .or(() -> nacionalidadRepository.findByClaveIsoIgnoreCase(nombreLimpio))
+                    .orElseThrow(() -> new ReglaNegocioException("La nacionalidad '" + nombreLimpio + "' no existe en el catalogo de la base de datos"));
+        }
+        throw new ReglaNegocioException("La nacionalidad es obligatoria. Debe proporcionar idNacionalidad o nombre de la nacionalidad del catalogo");
     }
 }

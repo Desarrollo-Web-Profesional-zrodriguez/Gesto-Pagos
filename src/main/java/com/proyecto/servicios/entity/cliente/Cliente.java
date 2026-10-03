@@ -61,6 +61,9 @@ public class Cliente {
     @Column(name = "sexo")
     private String sexo;
 
+    @Column(name = "id_nacionalidad")
+    private Long idNacionalidad;
+
     @Column(name = "nacionalidad")
     private String nacionalidad;
 

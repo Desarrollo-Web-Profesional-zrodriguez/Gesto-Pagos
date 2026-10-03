@@ -37,7 +37,7 @@ public class AuthServiceImpl implements AuthService {
         log.info("[Auth]: Intento de login para usuario: {}", request.getUsername());
 
         UsuarioLogin usuario = usuarioLoginRepository.findByUsername(request.getUsername().trim().toLowerCase())
-                .orElseThrow(() -> new AutenticacionException("Credenciales invalidas: Usuario no encontrado"));
+                .orElseThrow(() -> new AutenticacionException("El correo electronico no existe"));
 
         if (!Boolean.TRUE.equals(usuario.getActivo())) {
             throw new AutenticacionException("El usuario se encuentra inactivo");
@@ -50,6 +50,9 @@ public class AuthServiceImpl implements AuthService {
             if (PasswordEncryptionUtil.verificarPassword(request.getPassword(), usuario.getPasswordHash())) {
                 autenticado = true;
                 log.info("[Auth]: Autenticacion exitosa por contrasena para: {}", usuario.getUsername());
+            } else {
+                log.warn("[Auth]: Contrasena distinta a la registrada para: {}", usuario.getUsername());
+                throw new AutenticacionException("La contrasena es distinta a la registrada");
             }
         }
 
@@ -69,11 +72,12 @@ public class AuthServiceImpl implements AuthService {
                 log.info("[Auth]: Autenticacion exitosa por biometria facial MediaPipe para: {}", usuario.getUsername());
             } else {
                 log.warn("[Auth]: Fallo la verificacion de embedding biometrico facial para: {}", usuario.getUsername());
+                throw new AutenticacionException("El vector biometrico facial es distinto al registrado");
             }
         }
 
         if (!autenticado) {
-            throw new AutenticacionException("Credenciales invalidas o biometria facial no coincidente");
+            throw new AutenticacionException("Debe proporcionar contrasena o vector biometrico facial");
         }
 
         // Inactivar sesiones previas del usuario

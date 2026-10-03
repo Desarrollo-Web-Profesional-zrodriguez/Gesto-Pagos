@@ -64,7 +64,8 @@ El archivo del diagrama se encuentra en:
 | **PATCH**| `/clientes/{id}/reactivar` | Reactivación lógica del cliente y sus cuentas. |
 | **GET** | `/cuentas/{numeroCuenta}` | Consultar cuenta por número único. |
 | **GET** | `/cuentas/activas` | Consultar todas las cuentas bancarias activas. |
-| **GET** | `/cuentas/{numeroCuenta}/saldo` | Consultar saldo de una cuenta. |
+| **GET** | `/catalogos/nacionalidades` | Consultar catálogo de nacionalidades desde la BD. |
+| **GET** | `/catalogos/nacionalidades/{id}` | Consultar nacionalidad específica por ID. |
 | **POST** | `/auth/login` | Iniciar sesión (password cifrado o biometría MediaPipe). |
 | **GET** | `/auth/validar-sesion` | Validar sesión activa (contador de 5 min). |
 | **POST** | `/auth/logout` | Cierre voluntario de sesión. |
@@ -73,7 +74,12 @@ El archivo del diagrama se encuentra en:
 
 ## 5. Pruebas Rápidas con cURL (Listas para Terminal / Postman)
 
-### A. Registro de Cliente (Onboarding)
+### A. Consultar Catálogo de Nacionalidades (Base de Datos)
+```bash
+curl -X GET "http://localhost:8080/catalogos/nacionalidades"
+```
+
+### B. Registro de Cliente (Onboarding)
 ```bash
 curl -X POST "http://localhost:8080/clientes" \
   -H "Content-Type: application/json" \
@@ -85,7 +91,8 @@ curl -X POST "http://localhost:8080/clientes" \
     "fechaNacimiento": "1992-05-20",
     "curp": "PELJ920520HDFRRN09",
     "rfc": "PELJ9205201A0",
-    "sexo": "MASCULINO",
+    "sexo": "Masculino",
+    "idNacionalidad": 1,
     "nacionalidad": "Mexicana",
     "estadoCivil": "Soltero",
     "correoElectronico": "juan.perez@example.com",
@@ -103,20 +110,20 @@ curl -X POST "http://localhost:8080/clientes" \
     },
     "ocupacion": "Ingeniero de Software",
     "empresa": "Tech Solutions",
-    "ingresoMensual": 45000.0,
-    "saldoInicial": 2500.0,
+    "ingresoMensual": 45000.00,
+    "saldoInicial": 2500.00,
     "password": "PasswordSeguro123*",
     "biometricoFacialEmbedding": "[0.12, -0.45, 0.89, -0.05, 0.67]"
   }'
 ```
 
-### B. Actualización Parcial (PATCH)
+### C. Actualización Parcial (PATCH)
 ```bash
 curl -X PATCH "http://localhost:8080/clientes/1" \
   -H "Content-Type: application/json" \
   -d '{
     "telefonoMovil": "5599887766",
-    "ingresoMensual": 55000.0,
+    "ingresoMensual": 55000.00,
     "ocupacion": "Lead Architect"
   }'
 ```

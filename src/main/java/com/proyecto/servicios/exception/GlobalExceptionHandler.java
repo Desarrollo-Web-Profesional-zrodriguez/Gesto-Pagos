@@ -6,6 +6,7 @@ import java.util.Map;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -56,8 +58,8 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
     }
 
-    // 3. No encontrado (Cliente no existe, Cuenta no existe) -> HTTP 404
-    @ExceptionHandler({ClienteNoEncontradoException.class, CuentaNoEncontradaException.class})
+    // 3. No encontrado (Cliente no existe, Cuenta no existe, Recurso no encontrado) -> HTTP 404
+    @ExceptionHandler({ClienteNoEncontradoException.class, CuentaNoEncontradaException.class, RecursoNoEncontradoException.class})
     public ResponseEntity<ErrorResponse> manejarNoEncontrado(RuntimeException ex, HttpServletRequest request) {
         ErrorResponse response = ErrorResponse.builder()
                 .timestamp(LocalDateTime.now())
@@ -116,7 +118,86 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
     }
 
-    // 7. Excepción Genérica Inesperada -> HTTP 500
+    // 7. Formato de JSON o tipos de datos no legibles -> HTTP 400
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> manejarMensajeNoLegible(HttpMessageNotReadableException ex, HttpServletRequest request) {
+        String campo = "cuerpo";
+        String detalle = "El cuerpo de la solicitud contiene tipos de datos o formatos no validos";
+
+        Throwable cause = ex.getCause();
+        if (cause instanceof com.fasterxml.jackson.databind.exc.InvalidFormatException ife) {
+            if (ife.getPath() != null && !ife.getPath().isEmpty()) {
+                campo = ife.getPath().get(ife.getPath().size() - 1).getFieldName();
+            }
+            Object valor = ife.getValue();
+            Class<?> targetType = ife.getTargetType();
+            if (targetType != null && java.time.LocalDate.class.isAssignableFrom(targetType)) {
+                detalle = String.format("El campo '%s' tiene un formato de fecha invalido ('%s'). Solo se acepta el formato 'AAAA-MM-DD' (ejemplo: 1992-05-20)", campo, valor);
+            } else {
+                detalle = String.format("El campo '%s' recibio un valor de formato no valido ('%s')", campo, valor);
+            }
+        } else if (cause != null && cause.getCause() instanceof IllegalArgumentException iae) {
+            detalle = iae.getMessage();
+            if (detalle.contains("'")) {
+                int firstQuote = detalle.indexOf('\'');
+                int secondQuote = detalle.indexOf('\'', firstQuote + 1);
+                if (firstQuote != -1 && secondQuote != -1) {
+                    campo = detalle.substring(firstQuote + 1, secondQuote);
+                }
+            }
+        } else if (cause instanceof IllegalArgumentException iae) {
+            detalle = iae.getMessage();
+            if (detalle != null && detalle.contains("'")) {
+                int firstQuote = detalle.indexOf('\'');
+                int secondQuote = detalle.indexOf('\'', firstQuote + 1);
+                if (firstQuote != -1 && secondQuote != -1) {
+                    campo = detalle.substring(firstQuote + 1, secondQuote);
+                }
+            }
+        } else if (ex.getMessage() != null && ex.getMessage().contains("fechaNacimiento")) {
+            campo = "fechaNacimiento";
+            detalle = "El campo 'fechaNacimiento' tiene un formato de fecha invalido. Solo se acepta el formato 'AAAA-MM-DD' (ejemplo: 1992-05-20)";
+        }
+
+        Map<String, String> detalles = new HashMap<>();
+        detalles.put(campo, detalle);
+
+        ErrorResponse response = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.BAD_REQUEST.value())
+                .error("Error de formato en los datos de entrada")
+                .mensaje(detalle)
+                .path(request.getRequestURI())
+                .detallesValidacion(detalles)
+                .build();
+
+        log.warn("[FormatoInvalido]: Fallo en {}: {}", request.getRequestURI(), detalle);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+    }
+
+    // 8. Violación de restricciones en parámetros/variables -> HTTP 400
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<ErrorResponse> manejarViolacionRestricciones(ConstraintViolationException ex, HttpServletRequest request) {
+        Map<String, String> errores = new HashMap<>();
+        ex.getConstraintViolations().forEach(cv -> {
+            String prop = cv.getPropertyPath() != null ? cv.getPropertyPath().toString() : "parametro";
+            errores.put(prop, cv.getMessage());
+        });
+
+        ErrorResponse response = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.BAD_REQUEST.value())
+                .error("Violacion de restricciones de validacion")
+                .mensaje("Uno o mas parametros no cumplen con las reglas requeridas")
+                .path(request.getRequestURI())
+                .detallesValidacion(errores)
+                .build();
+
+        log.warn("[RestriccionInvalida]: {}", errores);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+    }
+
+    // 9. Excepción Genérica Inesperada -> HTTP 500
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> manejarGenerico(Exception ex, HttpServletRequest request) {
         ErrorResponse response = ErrorResponse.builder()
