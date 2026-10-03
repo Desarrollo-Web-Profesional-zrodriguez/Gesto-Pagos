@@ -41,7 +41,7 @@ public class AuthController {
     public ResponseEntity<Map<String, Object>> validarSesion(
             @Parameter(description = "Token de sesion en formato 'Bearer <token>'", example = "Bearer 550e8400-e29b-41d4-a716-446655440000") 
             @RequestHeader(value = "Authorization", required = false) String authHeader,
-            @Parameter(description = "Token de sesion directo (util en Swagger si no enviaste header)", example = "550e8400-e29b-41d4-a716-446655440000") 
+            @Parameter(description = "Token de sesion directo", example = "550e8400-e29b-41d4-a716-446655440000") 
             @RequestParam(value = "token", required = false) String tokenParam) {
 
         String tokenLimpio = extraerToken(authHeader, tokenParam);
@@ -58,7 +58,7 @@ public class AuthController {
     public ResponseEntity<Map<String, Object>> logout(
             @Parameter(description = "Token de sesion en formato 'Bearer <token>'", example = "Bearer 550e8400-e29b-41d4-a716-446655440000") 
             @RequestHeader(value = "Authorization", required = false) String authHeader,
-            @Parameter(description = "Token de sesion directo (util en Swagger si no enviaste header)", example = "550e8400-e29b-41d4-a716-446655440000") 
+            @Parameter(description = "Token de sesion directo", example = "550e8400-e29b-41d4-a716-446655440000") 
             @RequestParam(value = "token", required = false) String tokenParam) {
 
         String tokenLimpio = extraerToken(authHeader, tokenParam);

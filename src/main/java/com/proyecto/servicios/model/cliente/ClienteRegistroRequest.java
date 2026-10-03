@@ -28,22 +28,24 @@ public class ClienteRegistroRequest {
 
     // --- Datos Personales ---
     @NotBlank(message = "El nombre es obligatorio")
-    @Size(min = 2, max = 50, message = "El nombre debe tener entre 2 y 50 caracteres")
+    @Size(min = 3, max = 50, message = "El nombre debe tener entre 3 y 50 caracteres")
     @Pattern(regexp = "^[a-zA-ZáéíóúÁÉÍÓÚñÑ\\s]+$", message = "El nombre solo debe contener letras y espacios")
     @Schema(description = "Primer nombre", example = "Juan")
     private String nombre;
 
+    @Size(min = 3, max = 50, message = "El nombre debe tener entre 3 y 50 caracteres")
+    @Pattern(regexp = "^[a-zA-ZáéíóúÁÉÍÓÚñÑ\\s]+$", message = "El nombre solo debe contener letras y espacios")
     @Schema(description = "Segundo nombre (opcional)", example = "Carlos")
     private String segundoNombre;
 
     @NotBlank(message = "El apellido paterno es obligatorio")
-    @Size(min = 2, max = 50, message = "El apellido paterno debe tener entre 2 y 50 caracteres")
+    @Size(min = 3, max = 50, message = "El apellido paterno debe tener entre 3 y 50 caracteres")
     @Pattern(regexp = "^[a-zA-ZáéíóúÁÉÍÓÚñÑ\\s]+$", message = "El apellido paterno solo debe contener letras y espacios")
     @Schema(description = "Apellido paterno", example = "Perez")
     private String apellidoPaterno;
 
     @NotBlank(message = "El apellido materno es obligatorio")
-    @Size(min = 2, max = 50, message = "El apellido materno debe tener entre 2 y 50 caracteres")
+    @Size(min = 3, max = 50, message = "El apellido materno debe tener entre 3 y 50 caracteres")
     @Pattern(regexp = "^[a-zA-ZáéíóúÁÉÍÓÚñÑ\\s]+$", message = "El apellido materno solo debe contener letras y espacios")
     @Schema(description = "Apellido materno", example = "Lopez")
     private String apellidoMaterno;
@@ -64,7 +66,8 @@ public class ClienteRegistroRequest {
     private String rfc;
 
     @NotBlank(message = "El sexo es obligatorio")
-    @Schema(description = "Sexo", example = "MASCULINO")
+    @Pattern(regexp = "^(?i)(Masculino|Femenino)$", message = "El sexo solo puede ser 'Masculino' o 'Femenino'")
+    @Schema(description = "Sexo (Masculino o Femenino)", example = "Masculino")
     private String sexo;
 
     @NotBlank(message = "La nacionalidad es obligatoria")
@@ -72,7 +75,8 @@ public class ClienteRegistroRequest {
     private String nacionalidad;
 
     @NotBlank(message = "El estado civil es obligatorio")
-    @Schema(description = "Estado civil", example = "Soltero")
+    @Pattern(regexp = "^(?i)(Soltero|Casado|Uni[oó]n libre|Viudo)$", message = "El estado civil debe ser Soltero, Casado, Union libre o Viudo")
+    @Schema(description = "Estado civil (Soltero, Casado, Union libre, Viudo)", example = "Soltero")
     private String estadoCivil;
 
     // --- Datos de Contacto ---
@@ -117,8 +121,12 @@ public class ClienteRegistroRequest {
 
     // --- Credenciales para Login y Biometria ---
     @NotBlank(message = "La contrasena para el acceso es obligatoria")
-    @Size(min = 8, message = "La contrasena debe tener al menos 8 caracteres")
-    @Schema(description = "Contrasena de acceso inicial (minimo 8 caracteres)", example = "PasswordSeguro123*")
+    @Size(min = 8, max = 64, message = "La contrasena debe tener entre 8 y 64 caracteres")
+    @Pattern(
+        regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^a-zA-Z0-9\\s]).{8,64}$", 
+        message = "La contrasena debe ser segura: incluir al menos una letra mayuscula, una minuscula, un numero y un caracter especial (@, #, $, *, etc.)"
+    )
+    @Schema(description = "Contrasena segura de acceso (minimo 8 caracteres, al menos una mayuscula, una minuscula, un numero y un caracter especial)", example = "PasswordSeguro123*")
     private String password;
 
     @Schema(description = "Vector de embeddings faciales generado por MediaPipe", example = "[0.12, -0.45, 0.89, -0.05, 0.67]")

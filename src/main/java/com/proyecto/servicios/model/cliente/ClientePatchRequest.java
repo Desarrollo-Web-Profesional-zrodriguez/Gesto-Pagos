@@ -46,13 +46,15 @@ public class ClientePatchRequest {
     @Schema(description = "Fecha de nacimiento", example = "1992-05-20")
     private LocalDate fechaNacimiento;
 
-    @Schema(description = "Sexo", example = "MASCULINO")
+    @Pattern(regexp = "^$|^(?i)(Masculino|Femenino)$", message = "El sexo solo puede ser 'Masculino' o 'Femenino'")
+    @Schema(description = "Sexo (Masculino o Femenino)", example = "Masculino")
     private String sexo;
 
     @Schema(description = "Nacionalidad", example = "Mexicana")
     private String nacionalidad;
 
-    @Schema(description = "Estado civil", example = "Soltero")
+    @Pattern(regexp = "^$|^(?i)(Soltero|Casado|Uni[oó]n libre|Viudo)$", message = "El estado civil debe ser Soltero, Casado, Union libre o Viudo")
+    @Schema(description = "Estado civil (Soltero, Casado, Union libre, Viudo)", example = "Soltero")
     private String estadoCivil;
 
     // --- Datos de Contacto modificables ---
