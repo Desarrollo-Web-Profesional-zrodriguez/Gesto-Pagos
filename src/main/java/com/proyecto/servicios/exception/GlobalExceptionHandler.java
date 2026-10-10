@@ -197,6 +197,21 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
     }
 
+    // 8.1. Ruta o recurso no encontrado -> HTTP 404
+    @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
+    public ResponseEntity<ErrorResponse> manejarRecursoNoEncontrado(org.springframework.web.servlet.resource.NoResourceFoundException ex, HttpServletRequest request) {
+        ErrorResponse response = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.NOT_FOUND.value())
+                .error("Recurso no encontrado")
+                .mensaje("La ruta solicitada no existe o no tiene un controlador asignado")
+                .path(request.getRequestURI())
+                .build();
+
+        log.warn("[NoEncontrado]: Ruta inexistente {}", request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+    }
+
     // 9. Excepción Genérica Inesperada -> HTTP 500
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> manejarGenerico(Exception ex, HttpServletRequest request) {
