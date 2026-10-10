@@ -13,12 +13,16 @@ import com.proyecto.servicios.model.cliente.NacionalidadResponse;
 import com.proyecto.servicios.repositorys.cliente.NacionalidadRepository;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
+import org.springframework.validation.annotation.Validated;
 
 @RestController
 @RequestMapping("/catalogos")
 @RequiredArgsConstructor
+@Validated
 @Tag(name = "Catalogos", description = "Endpoints para consulta de catalogos del sistema almacenados en base de datos")
 public class CatalogoController {
 
@@ -40,7 +44,9 @@ public class CatalogoController {
 
     @GetMapping("/nacionalidades/{id}")
     @Operation(summary = "Consultar nacionalidad por ID", description = "Obtiene los detalles de una nacionalidad especifica por su ID de catalogo.")
-    public ResponseEntity<NacionalidadResponse> obtenerNacionalidadPorId(@PathVariable Long id) {
+    public ResponseEntity<NacionalidadResponse> obtenerNacionalidadPorId(
+            @Parameter(description = "ID de la nacionalidad (mayor a cero)", example = "1") 
+            @PathVariable @Positive(message = "El ID de la nacionalidad debe ser un numero mayor a cero") Long id) {
         return nacionalidadRepository.findById(id)
                 .map(n -> ResponseEntity.ok(NacionalidadResponse.builder()
                         .idNacionalidad(n.getIdNacionalidad())

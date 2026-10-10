@@ -26,13 +26,19 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.validation.annotation.Validated;
 
 @Slf4j
 @RestController
 @RequestMapping("/clientes")
 @RequiredArgsConstructor
+@Validated
 @Tag(name = "Clientes", description = "Operaciones de Onboarding, consulta, modificacion y baja logica de clientes")
 public class ClienteController {
 
@@ -58,7 +64,8 @@ public class ClienteController {
     @GetMapping("/{id}")
     @Operation(summary = "Consultar cliente por ID")
     public ResponseEntity<ClienteResponse> obtenerPorId(
-            @Parameter(description = "ID del cliente", example = "1") @PathVariable Long id) {
+            @Parameter(description = "ID del cliente (mayor a cero)", example = "1") 
+            @PathVariable @Positive(message = "El ID del cliente debe ser un numero mayor a cero") Long id) {
         return ResponseEntity.ok(clienteService.obtenerPorId(id));
     }
 
@@ -73,28 +80,41 @@ public class ClienteController {
     @GetMapping("/buscar/curp/{curp}")
     @Operation(summary = "Buscar cliente por CURP")
     public ResponseEntity<ClienteResponse> obtenerPorCurp(
-            @Parameter(description = "CURP oficial del cliente", example = "PELJ920520HDFRRN09") @PathVariable String curp) {
+            @Parameter(description = "CURP oficial del cliente (exactamente 18 caracteres)", example = "PELJ920520HDFRRN09") 
+            @PathVariable 
+            @Pattern(regexp = "^[A-Z]{4}\\d{6}[HM][A-Z]{5}[A-Z0-9]\\d$", message = "La CURP debe tener exactamente 18 caracteres y cumplir el formato oficial (ejemplo: PELJ920520HDFRRN09)") 
+            String curp) {
         return ResponseEntity.ok(clienteService.obtenerPorCurp(curp));
     }
 
     @GetMapping("/buscar/rfc/{rfc}")
     @Operation(summary = "Buscar cliente por RFC")
     public ResponseEntity<ClienteResponse> obtenerPorRfc(
-            @Parameter(description = "RFC oficial del cliente", example = "PELJ9205201A0") @PathVariable String rfc) {
+            @Parameter(description = "RFC oficial del cliente (12 o 13 caracteres)", example = "PELJ9205201A0") 
+            @PathVariable 
+            @Pattern(regexp = "^[A-ZÑ&]{3,4}\\d{6}[A-V1-9][A-Z1-9][0-9A]$", message = "El RFC debe tener 12 o 13 caracteres y cumplir el formato oficial (ejemplo: PELJ9205201A0)") 
+            String rfc) {
         return ResponseEntity.ok(clienteService.obtenerPorRfc(rfc));
     }
 
     @GetMapping("/buscar/correo/{correo}")
     @Operation(summary = "Buscar cliente por correo electronico")
     public ResponseEntity<ClienteResponse> obtenerPorCorreo(
-            @Parameter(description = "Correo electronico del cliente", example = "juan.perez@example.com") @PathVariable String correo) {
+            @Parameter(description = "Correo electronico del cliente", example = "juan.perez@example.com") 
+            @PathVariable 
+            @Pattern(regexp = "^[a-zA-Z0-9_!#$%&'*+/=?`{|}~^.-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$", message = "El formato del correo electronico no es valido (ejemplo: usuario@dominio.com)") 
+            @Size(max = 100, message = "El correo electronico no debe exceder 100 caracteres") 
+            String correo) {
         return ResponseEntity.ok(clienteService.obtenerPorCorreo(correo));
     }
 
     @GetMapping("/buscar/cuenta/{numeroCuenta}")
     @Operation(summary = "Buscar cliente por numero de cuenta")
     public ResponseEntity<ClienteResponse> obtenerPorNumeroCuenta(
-            @Parameter(description = "Numero de cuenta bancaria", example = "1000000001") @PathVariable String numeroCuenta) {
+            @Parameter(description = "Numero de cuenta bancaria (10 digitos)", example = "1000000001") 
+            @PathVariable 
+            @Pattern(regexp = "^\\d{10}$", message = "El numero de cuenta debe tener exactamente 10 digitos numericos") 
+            String numeroCuenta) {
         return ResponseEntity.ok(clienteService.obtenerPorNumeroCuenta(numeroCuenta));
     }
 
@@ -103,9 +123,9 @@ public class ClienteController {
     @Operation(summary = "Consultar clientes registrados en un rango de fechas")
     public ResponseEntity<List<ClienteResponse>> obtenerPorRangoFechas(
             @Parameter(description = "Fecha inicial YYYY-MM-DD", example = "2026-01-01") 
-            @RequestParam("inicio") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate inicio,
+            @RequestParam("inicio") @NotNull(message = "La fecha de inicio es requerida") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate inicio,
             @Parameter(description = "Fecha final YYYY-MM-DD", example = "2026-12-31") 
-            @RequestParam("fin") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fin) {
+            @RequestParam("fin") @NotNull(message = "La fecha final es requerida") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fin) {
         return ResponseEntity.ok(clienteService.obtenerPorRangoFechas(inicio, fin));
     }
 
@@ -113,7 +133,8 @@ public class ClienteController {
     @PutMapping("/{id}")
     @Operation(summary = "Actualizar informacion completa del cliente", description = "No permite modificar CURP, RFC ni numero de cuenta")
     public ResponseEntity<ClienteResponse> actualizarCompleto(
-            @Parameter(description = "ID del cliente", example = "1") @PathVariable Long id, 
+            @Parameter(description = "ID del cliente (mayor a cero)", example = "1") 
+            @PathVariable @Positive(message = "El ID del cliente debe ser un numero mayor a cero") Long id, 
             @Valid @RequestBody ClienteRegistroRequest request) {
         return ResponseEntity.ok(clienteService.actualizarCompleto(id, request));
     }
@@ -122,7 +143,8 @@ public class ClienteController {
     @PatchMapping("/{id}")
     @Operation(summary = "Actualizacion parcial de datos (PATCH)", description = "Permite modificar solo los campos enviados, protegiendo CURP y RFC")
     public ResponseEntity<ClienteResponse> actualizarParcial(
-            @Parameter(description = "ID del cliente", example = "1") @PathVariable Long id, 
+            @Parameter(description = "ID del cliente (mayor a cero)", example = "1") 
+            @PathVariable @Positive(message = "El ID del cliente debe ser un numero mayor a cero") Long id, 
             @Valid @RequestBody ClientePatchRequest request) {
         return ResponseEntity.ok(clienteService.actualizarParcial(id, request));
     }
@@ -131,7 +153,8 @@ public class ClienteController {
     @DeleteMapping("/{id}")
     @Operation(summary = "Baja logica del cliente", description = "Desactiva al cliente y suspende automaticamente sus cuentas asociadas")
     public ResponseEntity<Void> desactivarCliente(
-            @Parameter(description = "ID del cliente", example = "1") @PathVariable Long id) {
+            @Parameter(description = "ID del cliente (mayor a cero)", example = "1") 
+            @PathVariable @Positive(message = "El ID del cliente debe ser un numero mayor a cero") Long id) {
         clienteService.desactivarCliente(id);
         return ResponseEntity.noContent().build();
     }
@@ -140,7 +163,8 @@ public class ClienteController {
     @PatchMapping("/{id}/reactivar")
     @Operation(summary = "Reactivar cliente desactivado (PATCH)")
     public ResponseEntity<ClienteResponse> reactivarCliente(
-            @Parameter(description = "ID del cliente", example = "1") @PathVariable Long id) {
+            @Parameter(description = "ID del cliente (mayor a cero)", example = "1") 
+            @PathVariable @Positive(message = "El ID del cliente debe ser un numero mayor a cero") Long id) {
         return ResponseEntity.ok(clienteService.reactivarCliente(id));
     }
 }
