@@ -203,6 +203,9 @@ public class ClienteServiceImpl implements ClienteService {
     @Override
     @Transactional(readOnly = true)
     public List<ClienteResponse> obtenerPorRangoFechas(LocalDate inicio, LocalDate fin) {
+        if (inicio != null && fin != null && inicio.isAfter(fin)) {
+            throw new ReglaNegocioException("La fecha inicial ('" + inicio + "') no puede ser posterior a la fecha final ('" + fin + "')");
+        }
         LocalDateTime desde = inicio.atStartOfDay();
         LocalDateTime hasta = fin.atTime(LocalTime.MAX);
         return clienteRepository.findByFechaCreacionBetween(desde, hasta).stream()

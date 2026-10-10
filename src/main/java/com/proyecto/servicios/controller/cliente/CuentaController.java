@@ -15,11 +15,14 @@ import com.proyecto.servicios.service.cliente.CuentaService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.constraints.Pattern;
 import lombok.RequiredArgsConstructor;
+import org.springframework.validation.annotation.Validated;
 
 @RestController
 @RequestMapping("/cuentas")
 @RequiredArgsConstructor
+@Validated
 @Tag(name = "Cuentas y Saldos", description = "Consultas de cuentas bancarias y saldos disponibles")
 public class CuentaController {
 
@@ -29,7 +32,10 @@ public class CuentaController {
     @GetMapping("/{numeroCuenta}")
     @Operation(summary = "Consultar cuenta por su numero unico")
     public ResponseEntity<CuentaResponse> obtenerPorNumeroCuenta(
-            @Parameter(description = "Numero de cuenta bancaria", example = "1000000001") @PathVariable String numeroCuenta) {
+            @Parameter(description = "Numero de cuenta bancaria (10 digitos)", example = "1000000001") 
+            @PathVariable 
+            @Pattern(regexp = "^\\d{10}$", message = "El numero de cuenta debe tener exactamente 10 digitos numericos") 
+            String numeroCuenta) {
         return ResponseEntity.ok(cuentaService.obtenerPorNumeroCuenta(numeroCuenta));
     }
 
@@ -44,7 +50,10 @@ public class CuentaController {
     @GetMapping("/{numeroCuenta}/saldo")
     @Operation(summary = "Consultar saldo disponible y contable de una cuenta")
     public ResponseEntity<SaldoResponse> obtenerSaldoPorNumeroCuenta(
-            @Parameter(description = "Numero de cuenta bancaria", example = "1000000001") @PathVariable String numeroCuenta) {
+            @Parameter(description = "Numero de cuenta bancaria (10 digitos)", example = "1000000001") 
+            @PathVariable 
+            @Pattern(regexp = "^\\d{10}$", message = "El numero de cuenta debe tener exactamente 10 digitos numericos") 
+            String numeroCuenta) {
         return ResponseEntity.ok(cuentaService.obtenerSaldoPorNumeroCuenta(numeroCuenta));
     }
 }

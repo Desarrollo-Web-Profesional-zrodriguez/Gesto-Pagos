@@ -13,6 +13,8 @@ import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
@@ -175,20 +177,23 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
     }
 
-    // 8. Violación de restricciones en parámetros/variables -> HTTP 400
+    // 8. Violación de restricciones en parámetros/variables (Bean Validation) -> HTTP 400
     @ExceptionHandler(ConstraintViolationException.class)
     public ResponseEntity<ErrorResponse> manejarViolacionRestricciones(ConstraintViolationException ex, HttpServletRequest request) {
         Map<String, String> errores = new HashMap<>();
         ex.getConstraintViolations().forEach(cv -> {
             String prop = cv.getPropertyPath() != null ? cv.getPropertyPath().toString() : "parametro";
+            if (prop.contains(".")) {
+                prop = prop.substring(prop.lastIndexOf('.') + 1);
+            }
             errores.put(prop, cv.getMessage());
         });
 
         ErrorResponse response = ErrorResponse.builder()
                 .timestamp(LocalDateTime.now())
                 .status(HttpStatus.BAD_REQUEST.value())
-                .error("Violacion de restricciones de validacion")
-                .mensaje("Uno o mas parametros no cumplen con las reglas requeridas")
+                .error("Error de validacion en los parametros de la solicitud")
+                .mensaje("Uno o mas parametros de la URL no cumplen con las reglas requeridas")
                 .path(request.getRequestURI())
                 .detallesValidacion(errores)
                 .build();
@@ -197,7 +202,52 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
     }
 
-    // 8.1. Ruta o recurso no encontrado -> HTTP 404
+    // 8.1. Validación de parámetros en métodos de controladores (Spring Boot 3) -> HTTP 400
+    @ExceptionHandler(HandlerMethodValidationException.class)
+    public ResponseEntity<ErrorResponse> manejarHandlerMethodValidation(HandlerMethodValidationException ex, HttpServletRequest request) {
+        Map<String, String> errores = new HashMap<>();
+        ex.getAllValidationResults().forEach(result -> {
+            String paramName = result.getMethodParameter().getParameterName();
+            result.getResolvableErrors().forEach(error -> {
+                errores.put(paramName != null ? paramName : "parametro", error.getDefaultMessage());
+            });
+        });
+
+        ErrorResponse response = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.BAD_REQUEST.value())
+                .error("Error de validacion en los parametros de la solicitud")
+                .mensaje("Uno o mas parametros de la URL no cumplen con las reglas requeridas")
+                .path(request.getRequestURI())
+                .detallesValidacion(errores)
+                .build();
+
+        log.warn("[ValidacionParametro]: {}", errores);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+    }
+
+    // 8.2. Error de tipo de dato en parámetro (ej. texto en vez de número) -> HTTP 400
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ErrorResponse> manejarTipoInvalido(MethodArgumentTypeMismatchException ex, HttpServletRequest request) {
+        String mensaje = String.format("El parametro '%s' recibio un valor invalido ('%s'). Se esperaba un tipo de dato valido.",
+                ex.getName(), ex.getValue());
+        Map<String, String> detalles = new HashMap<>();
+        detalles.put(ex.getName(), mensaje);
+
+        ErrorResponse response = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.BAD_REQUEST.value())
+                .error("Tipo de dato invalido en parametro")
+                .mensaje(mensaje)
+                .path(request.getRequestURI())
+                .detallesValidacion(detalles)
+                .build();
+
+        log.warn("[TipoInvalido]: {}", mensaje);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+    }
+
+    // 8.3. Ruta o recurso no encontrado -> HTTP 404
     @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
     public ResponseEntity<ErrorResponse> manejarRecursoNoEncontrado(org.springframework.web.servlet.resource.NoResourceFoundException ex, HttpServletRequest request) {
         ErrorResponse response = ErrorResponse.builder()
