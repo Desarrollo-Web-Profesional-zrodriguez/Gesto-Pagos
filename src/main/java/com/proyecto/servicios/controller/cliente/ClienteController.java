@@ -18,20 +18,18 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.proyecto.servicios.model.cliente.ClienteBusquedaAvanzadaRequest;
+import com.proyecto.servicios.model.cliente.ClienteIdentificadorRequest;
 import com.proyecto.servicios.model.cliente.ClientePatchRequest;
 import com.proyecto.servicios.model.cliente.ClienteRegistroRequest;
 import com.proyecto.servicios.model.cliente.ClienteResponse;
+import com.proyecto.servicios.exception.ReglaNegocioException;
 import com.proyecto.servicios.service.cliente.ClienteService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Pattern;
-import jakarta.validation.constraints.Positive;
-import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.validation.annotation.Validated;
@@ -55,38 +53,34 @@ public class ClienteController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
-    // 2. Consultar todos los clientes
+    // 2. Consultar clientes (todos o por identificador en query param)
     @GetMapping
-    @Operation(summary = "Consultar todos los clientes")
-    public ResponseEntity<List<ClienteResponse>> obtenerTodos() {
+    @Operation(summary = "Consultar clientes", description = "Retorna todos los clientes. Si se envia el parametro 'identificador' (RFC, CURP, correo o cuenta), retorna el cliente especifico.")
+    public ResponseEntity<?> obtenerClientes(
+            @Parameter(description = "RFC, CURP, correo electronico o numero de cuenta (opcional)", example = "PELJ920520HDFRRN09") 
+            @RequestParam(value = "identificador", required = false) String identificador) {
+        if (identificador != null && !identificador.trim().isEmpty()) {
+            return ResponseEntity.ok(clienteService.obtenerPorIdentificador(identificador));
+        }
         return ResponseEntity.ok(clienteService.obtenerTodos());
     }
 
-    // 3. Consultar cliente por identificador (RFC, CURP, correo o número de cuenta)
-    @GetMapping("/{identificador}")
-    @Operation(summary = "Consultar cliente por identificador", description = "Busca el cliente mediante su RFC, CURP, correo electronico o numero de cuenta (tambien soporta ID numerico)")
-    public ResponseEntity<ClienteResponse> obtenerPorIdentificador(
-            @Parameter(description = "RFC, CURP, correo electronico o numero de cuenta", example = "PELJ920520HDFRRN09") 
-            @PathVariable @NotBlank(message = "El identificador del cliente es requerido") String identificador) {
-        return ResponseEntity.ok(clienteService.obtenerPorIdentificador(identificador));
-    }
-
-    // 4. Consultar clientes activos
+    // 3. Consultar clientes activos
     @GetMapping("/activos")
     @Operation(summary = "Consultar clientes activos")
     public ResponseEntity<List<ClienteResponse>> obtenerClientesActivos() {
         return ResponseEntity.ok(clienteService.obtenerClientesActivos());
     }
 
-    // 5. Búsqueda avanzada por POST
+    // 4. Búsqueda avanzada por POST
     @PostMapping("/buscar")
-    @Operation(summary = "Busqueda avanzada de clientes (POST)", description = "Busca uno o varios clientes enviando un JSON con cualquiera de los 4 criterios (CURP, RFC, correo electronico o numero de cuenta). Retorna la lista de clientes encontrados sin exponer su ID.")
+    @Operation(summary = "Busqueda avanzada de clientes por coincidencias (POST)", description = "Busca clientes por coincidencias parciales enviando JSON con CURP, RFC, correo electronico (ej. 'juan') o numero de cuenta. Retorna todas las coincidencias encontradas sin exponer el ID.")
     public ResponseEntity<List<ClienteResponse>> busquedaAvanzada(
             @RequestBody ClienteBusquedaAvanzadaRequest request) {
         return ResponseEntity.ok(clienteService.busquedaAvanzada(request));
     }
 
-    // 6. Consultar clientes registrados en un rango de fechas
+    // 5. Consultar clientes registrados en un rango de fechas
     @GetMapping("/fechas")
     @Operation(summary = "Consultar clientes registrados en un rango de fechas")
     public ResponseEntity<List<ClienteResponse>> obtenerPorRangoFechas(
@@ -97,42 +91,48 @@ public class ClienteController {
         return ResponseEntity.ok(clienteService.obtenerPorRangoFechas(inicio, fin));
     }
 
-    // 7. Actualizacion Completa (PUT) por RFC, CURP, correo o número de cuenta
-    @PutMapping("/{identificador}")
-    @Operation(summary = "Actualizar informacion completa del cliente", description = "Busca por RFC, CURP, correo o numero de cuenta. No permite modificar CURP, RFC ni numero de cuenta")
-    public ResponseEntity<ClienteResponse> actualizarCompleto(
-            @Parameter(description = "RFC, CURP, correo electronico o numero de cuenta", example = "PELJ920520HDFRRN09") 
-            @PathVariable @NotBlank(message = "El identificador del cliente es requerido") String identificador, 
-            @Valid @RequestBody ClienteRegistroRequest request) {
-        return ResponseEntity.ok(clienteService.actualizarCompletoPorIdentificador(identificador, request));
+    // 6. Actualizacion Completa (PUT) por cuerpo del request
+    @PutMapping
+    @Operation(summary = "Actualizar informacion completa del cliente", description = "Busca por identificador, RFC, CURP o correo en el cuerpo del request. No permite modificar CURP, RFC ni numero de cuenta")
+    public ResponseEntity<ClienteResponse> actualizarCompleto(@Valid @RequestBody ClienteRegistroRequest request) {
+        return ResponseEntity.ok(clienteService.actualizarCompleto(request));
     }
 
-    // 8. Actualizacion Parcial (PATCH) por RFC, CURP, correo o número de cuenta
-    @PatchMapping("/{identificador}")
-    @Operation(summary = "Actualizacion parcial de datos (PATCH)", description = "Busca por RFC, CURP, correo o numero de cuenta. Permite modificar solo los campos enviados, protegiendo CURP y RFC")
-    public ResponseEntity<ClienteResponse> actualizarParcial(
-            @Parameter(description = "RFC, CURP, correo electronico o numero de cuenta", example = "PELJ920520HDFRRN09") 
-            @PathVariable @NotBlank(message = "El identificador del cliente es requerido") String identificador, 
-            @Valid @RequestBody ClientePatchRequest request) {
-        return ResponseEntity.ok(clienteService.actualizarParcialPorIdentificador(identificador, request));
+    // 7. Actualizacion Parcial (PATCH) por cuerpo del request
+    @PatchMapping
+    @Operation(summary = "Actualizacion parcial de datos (PATCH)", description = "Busca por identificador (o correo) en el cuerpo del request. Permite modificar solo los campos enviados, protegiendo CURP y RFC")
+    public ResponseEntity<ClienteResponse> actualizarParcial(@Valid @RequestBody ClientePatchRequest request) {
+        return ResponseEntity.ok(clienteService.actualizarParcial(request));
     }
 
-    // 9. Baja Logica (DELETE) por RFC, CURP, correo o número de cuenta
-    @DeleteMapping("/{identificador}")
-    @Operation(summary = "Baja logica del cliente", description = "Busca por RFC, CURP, correo o numero de cuenta. Desactiva al cliente y suspende automaticamente sus cuentas asociadas")
+    // 8. Baja Logica (DELETE) por cuerpo del request o parametro
+    @DeleteMapping
+    @Operation(summary = "Baja logica del cliente", description = "Busca por RFC, CURP, correo o numero de cuenta enviado en el cuerpo de la peticion (o parametro). Desactiva al cliente y suspende automaticamente sus cuentas asociadas")
     public ResponseEntity<Void> desactivarCliente(
-            @Parameter(description = "RFC, CURP, correo electronico o numero de cuenta", example = "PELJ920520HDFRRN09") 
-            @PathVariable @NotBlank(message = "El identificador del cliente es requerido") String identificador) {
-        clienteService.desactivarClientePorIdentificador(identificador);
+            @RequestBody(required = false) ClienteIdentificadorRequest body,
+            @Parameter(description = "RFC, CURP, correo o cuenta (si no se envia en body)", example = "PELJ920520HDFRRN09") 
+            @RequestParam(value = "identificador", required = false) String paramIdentificador) {
+        String idFinal = (body != null && body.getIdentificador() != null && !body.getIdentificador().trim().isEmpty())
+                ? body.getIdentificador().trim() : paramIdentificador;
+        if (idFinal == null || idFinal.trim().isEmpty()) {
+            throw new ReglaNegocioException("Debe proporcionar el identificador del cliente en el request");
+        }
+        clienteService.desactivarClientePorIdentificador(idFinal.trim());
         return ResponseEntity.noContent().build();
     }
 
-    // 10. Reactivacion de Cliente (PATCH) por RFC, CURP, correo o número de cuenta
-    @PatchMapping("/{identificador}/reactivar")
-    @Operation(summary = "Reactivar cliente desactivado (PATCH)", description = "Busca por RFC, CURP, correo o numero de cuenta y reactiva al cliente y sus cuentas")
+    // 9. Reactivacion de Cliente (PATCH) por cuerpo del request o parametro
+    @PatchMapping("/reactivar")
+    @Operation(summary = "Reactivar cliente desactivado (PATCH)", description = "Busca por RFC, CURP, correo o numero de cuenta enviado en el cuerpo de la peticion (o parametro) y reactiva al cliente y sus cuentas")
     public ResponseEntity<ClienteResponse> reactivarCliente(
-            @Parameter(description = "RFC, CURP, correo electronico o numero de cuenta", example = "PELJ920520HDFRRN09") 
-            @PathVariable @NotBlank(message = "El identificador del cliente es requerido") String identificador) {
-        return ResponseEntity.ok(clienteService.reactivarClientePorIdentificador(identificador));
+            @RequestBody(required = false) ClienteIdentificadorRequest body,
+            @Parameter(description = "RFC, CURP, correo o cuenta (si no se envia en body)", example = "PELJ920520HDFRRN09") 
+            @RequestParam(value = "identificador", required = false) String paramIdentificador) {
+        String idFinal = (body != null && body.getIdentificador() != null && !body.getIdentificador().trim().isEmpty())
+                ? body.getIdentificador().trim() : paramIdentificador;
+        if (idFinal == null || idFinal.trim().isEmpty()) {
+            throw new ReglaNegocioException("Debe proporcionar el identificador del cliente en el request");
+        }
+        return ResponseEntity.ok(clienteService.reactivarClientePorIdentificador(idFinal.trim()));
     }
 }

@@ -12,6 +12,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 @Getter
 @Setter
 @Builder
@@ -20,6 +22,7 @@ import lombok.Setter;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class ClienteResponse {
 
+    @Schema(hidden = true)
     private Long idCliente;
     private String nombre;
     private String segundoNombre;
