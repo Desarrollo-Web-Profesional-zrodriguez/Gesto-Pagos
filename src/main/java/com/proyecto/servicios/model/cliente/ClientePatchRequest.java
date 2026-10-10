@@ -25,6 +25,9 @@ import lombok.Setter;
 @Schema(description = "Solicitud para actualizacion parcial de cliente (PATCH)")
 public class ClientePatchRequest {
 
+    @Schema(description = "Identificador del cliente a modificar (RFC, CURP, correo electronico o numero de cuenta)", example = "PELJ920520HDFRRN09")
+    private String identificador;
+
     // --- Datos Personales modificables ---
     @Size(min = 3, max = 50, message = "El nombre debe tener entre 3 y 50 caracteres")
     @Pattern(regexp = "^$|^[a-zA-ZáéíóúÁÉÍÓÚñÑ\\s]+$", message = "El nombre solo debe contener letras y espacios, sin numeros ni '#'")

@@ -35,9 +35,13 @@ public interface ClienteService {
     List<ClienteResponse> obtenerPorRangoFechas(LocalDate inicio, LocalDate fin);
 
     // 3. Actualizaciones
+    ClienteResponse actualizarCompleto(ClienteRegistroRequest request);
+
     ClienteResponse actualizarCompleto(Long id, ClienteRegistroRequest request);
 
     ClienteResponse actualizarCompletoPorIdentificador(String identificador, ClienteRegistroRequest request);
+
+    ClienteResponse actualizarParcial(ClientePatchRequest request);
 
     ClienteResponse actualizarParcial(Long id, ClientePatchRequest request);
 

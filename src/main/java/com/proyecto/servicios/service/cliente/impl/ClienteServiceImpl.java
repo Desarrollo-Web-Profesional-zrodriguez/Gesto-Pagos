@@ -168,7 +168,7 @@ public class ClienteServiceImpl implements ClienteService {
     @Transactional(readOnly = true)
     public List<ClienteResponse> busquedaAvanzada(ClienteBusquedaAvanzadaRequest request) {
         if (request == null) {
-            throw new ReglaNegocioException("Debe ingresar al menos un criterio de busqueda (RFC, CURP, correo electronico o numero de cuenta)");
+            throw new ReglaNegocioException("Debe ingresar al menos un criterio de busqueda (CURP, RFC, correo electronico o numero de cuenta)");
         }
         boolean tieneCurp = request.getCurp() != null && !request.getCurp().trim().isEmpty();
         boolean tieneRfc = request.getRfc() != null && !request.getRfc().trim().isEmpty();
@@ -176,26 +176,33 @@ public class ClienteServiceImpl implements ClienteService {
         boolean tieneCuenta = request.getNumeroCuenta() != null && !request.getNumeroCuenta().trim().isEmpty();
 
         if (!tieneCurp && !tieneRfc && !tieneCorreo && !tieneCuenta) {
-            throw new ReglaNegocioException("Debe ingresar al menos un criterio de busqueda (RFC, CURP, correo electronico o numero de cuenta)");
+            throw new ReglaNegocioException("Debe ingresar al menos un criterio de busqueda (CURP, RFC, correo electronico o numero de cuenta)");
         }
 
         Map<Long, Cliente> clientesMap = new LinkedHashMap<>();
 
+        // 1. Coincidencia por CURP (exacta o parcial)
         if (tieneCurp) {
-            clienteRepository.findByCurpIgnoreCase(request.getCurp().trim())
-                    .ifPresent(c -> clientesMap.put(c.getIdCliente(), c));
+            clienteRepository.findByCurpContainingIgnoreCase(request.getCurp().trim())
+                    .forEach(c -> clientesMap.put(c.getIdCliente(), c));
         }
+
+        // 3. Coincidencia por RFC (exacta o parcial)
         if (tieneRfc) {
-            clienteRepository.findByRfcIgnoreCase(request.getRfc().trim())
-                    .ifPresent(c -> clientesMap.put(c.getIdCliente(), c));
+            clienteRepository.findByRfcContainingIgnoreCase(request.getRfc().trim())
+                    .forEach(c -> clientesMap.put(c.getIdCliente(), c));
         }
+
+        // 4. Coincidencia por Correo Electrónico (exacta o parcial)
         if (tieneCorreo) {
-            clienteRepository.findByCorreoElectronicoIgnoreCase(request.getCorreoElectronico().trim())
-                    .ifPresent(c -> clientesMap.put(c.getIdCliente(), c));
+            clienteRepository.findByCorreoElectronicoContainingIgnoreCase(request.getCorreoElectronico().trim())
+                    .forEach(c -> clientesMap.put(c.getIdCliente(), c));
         }
+
+        // 5. Coincidencia por Número de Cuenta (exacta o parcial)
         if (tieneCuenta) {
-            clienteRepository.findByCuentasNumeroCuenta(request.getNumeroCuenta().trim())
-                    .ifPresent(c -> clientesMap.put(c.getIdCliente(), c));
+            clienteRepository.buscarPorNumeroCuentaContaining(request.getNumeroCuenta().trim())
+                    .forEach(c -> clientesMap.put(c.getIdCliente(), c));
         }
 
         if (clientesMap.isEmpty()) {
@@ -420,9 +427,43 @@ public class ClienteServiceImpl implements ClienteService {
 
     @Override
     @Transactional
+    public ClienteResponse actualizarCompleto(ClienteRegistroRequest request) {
+        if (request == null) {
+            throw new ReglaNegocioException("Los datos para actualizar el cliente son requeridos");
+        }
+        String idTarget = (request.getIdentificador() != null && !request.getIdentificador().trim().isEmpty())
+                ? request.getIdentificador().trim()
+                : (request.getCurp() != null && !request.getCurp().trim().isEmpty())
+                        ? request.getCurp().trim()
+                        : request.getRfc();
+        if (idTarget == null || idTarget.trim().isEmpty()) {
+            throw new ReglaNegocioException("Debe proporcionar un identificador, CURP o RFC en la solicitud para actualizar el cliente");
+        }
+        return actualizarCompletoPorIdentificador(idTarget, request);
+    }
+
+    @Override
+    @Transactional
     public ClienteResponse actualizarCompletoPorIdentificador(String identificador, ClienteRegistroRequest request) {
         Cliente cliente = buscarClienteEntidadPorIdentificador(identificador);
         return actualizarCompleto(cliente.getIdCliente(), request);
+    }
+
+    @Override
+    @Transactional
+    public ClienteResponse actualizarParcial(ClientePatchRequest request) {
+        if (request == null) {
+            throw new ReglaNegocioException("Los datos para actualizacion parcial son requeridos");
+        }
+        String idTarget = (request.getIdentificador() != null && !request.getIdentificador().trim().isEmpty())
+                ? request.getIdentificador().trim()
+                : (request.getCorreoElectronico() != null && !request.getCorreoElectronico().trim().isEmpty())
+                        ? request.getCorreoElectronico().trim()
+                        : null;
+        if (idTarget == null || idTarget.trim().isEmpty()) {
+            throw new ReglaNegocioException("Debe proporcionar el identificador del cliente en el cuerpo de la peticion ('identificador' o 'correoElectronico')");
+        }
+        return actualizarParcialPorIdentificador(idTarget, request);
     }
 
     @Override
@@ -481,6 +522,12 @@ public class ClienteServiceImpl implements ClienteService {
                 opt = clienteRepository.findById(id);
                 if (opt.isPresent()) return opt.get();
             } catch (NumberFormatException ignored) {}
+        }
+
+        // 7. Intentar por coincidencia de nombre o apellidos
+        List<Cliente> porNombre = clienteRepository.buscarPorNombreOCoincidencia(valor);
+        if (!porNombre.isEmpty()) {
+            return porNombre.get(0);
         }
 
         throw new ClienteNoEncontradoException("No se encontro cliente con el identificador proporcionado: " + valor);

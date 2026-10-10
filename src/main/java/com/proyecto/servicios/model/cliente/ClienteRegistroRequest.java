@@ -27,6 +27,9 @@ import lombok.Setter;
 @Schema(description = "Solicitud para registrar nuevo cliente (Onboarding)")
 public class ClienteRegistroRequest {
 
+    @Schema(description = "Identificador opcional del cliente a actualizar (RFC, CURP, correo electronico o numero de cuenta). Si no se envia, se toma la CURP o RFC del cuerpo.", example = "PELJ920520HDFRRN09")
+    private String identificador;
+
     // --- Datos Personales ---
     @NotBlank(message = "El nombre es obligatorio")
     @Size(min = 3, max = 50, message = "El nombre debe tener entre 3 y 50 caracteres")

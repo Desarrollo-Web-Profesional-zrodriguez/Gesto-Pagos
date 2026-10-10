@@ -12,18 +12,18 @@ import lombok.Setter;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Schema(description = "Criterios para busqueda avanzada de clientes por RFC, CURP, correo electronico o numero de cuenta")
+@Schema(description = "Criterios para busqueda avanzada de clientes por coincidencias (CURP, RFC, correo electronico o numero de cuenta)")
 public class ClienteBusquedaAvanzadaRequest {
 
-    @Schema(description = "CURP del cliente (18 caracteres)", example = "PELJ920520HDFRRN09")
+    @Schema(description = "CURP del cliente (coincidencia exacta o parcial)", example = "PELJ920520HDFRRN09")
     private String curp;
 
-    @Schema(description = "RFC del cliente (12 o 13 caracteres)", example = "PELJ9205201A0")
+    @Schema(description = "RFC del cliente (coincidencia exacta o parcial)", example = "PELJ9205201A0")
     private String rfc;
 
-    @Schema(description = "Correo electronico del cliente", example = "juan.perez@example.com")
+    @Schema(description = "Correo electronico del cliente (coincidencia exacta o parcial)", example = "juan.perez@example.com")
     private String correoElectronico;
 
-    @Schema(description = "Numero de cuenta bancaria (10 digitos)", example = "1000000001")
+    @Schema(description = "Numero de cuenta bancaria (coincidencia exacta o parcial)", example = "1000000001")
     private String numeroCuenta;
 }
