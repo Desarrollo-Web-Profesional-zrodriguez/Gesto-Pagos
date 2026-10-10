@@ -5,7 +5,10 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.Period;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
@@ -20,6 +23,7 @@ import com.proyecto.servicios.exception.ClienteNoEncontradoException;
 import com.proyecto.servicios.exception.CurpDuplicadaException;
 import com.proyecto.servicios.exception.ReglaNegocioException;
 import com.proyecto.servicios.exception.RfcDuplicadoException;
+import com.proyecto.servicios.model.cliente.ClienteBusquedaAvanzadaRequest;
 import com.proyecto.servicios.model.cliente.ClientePatchRequest;
 import com.proyecto.servicios.model.cliente.ClienteRegistroRequest;
 import com.proyecto.servicios.model.cliente.ClienteResponse;
@@ -140,8 +144,72 @@ public class ClienteServiceImpl implements ClienteService {
         usuarioLoginRepository.save(usuario);
         clienteGuardado.setUsuarioLogin(usuario);
 
-        log.info("[Onboarding]: Exitoso para cliente ID: {}, Cuenta asignada: {}", clienteGuardado.getIdCliente(), numeroCuenta);
-        return mapearAClienteResponse(clienteGuardado);
+        log.info("[Onboarding]: Exitoso para cliente, Cuenta asignada: {}", numeroCuenta);
+        ClienteResponse response = mapearAClienteResponse(clienteGuardado);
+        response.setIdCliente(null);
+        if (response.getCuentas() != null) {
+            response.getCuentas().forEach(c -> c.setIdCliente(null));
+        }
+        return response;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ClienteResponse obtenerPorIdentificador(String identificador) {
+        ClienteResponse resp = mapearAClienteResponse(buscarClienteEntidadPorIdentificador(identificador));
+        resp.setIdCliente(null);
+        if (resp.getCuentas() != null) {
+            resp.getCuentas().forEach(c -> c.setIdCliente(null));
+        }
+        return resp;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ClienteResponse> busquedaAvanzada(ClienteBusquedaAvanzadaRequest request) {
+        if (request == null) {
+            throw new ReglaNegocioException("Debe ingresar al menos un criterio de busqueda (RFC, CURP, correo electronico o numero de cuenta)");
+        }
+        boolean tieneCurp = request.getCurp() != null && !request.getCurp().trim().isEmpty();
+        boolean tieneRfc = request.getRfc() != null && !request.getRfc().trim().isEmpty();
+        boolean tieneCorreo = request.getCorreoElectronico() != null && !request.getCorreoElectronico().trim().isEmpty();
+        boolean tieneCuenta = request.getNumeroCuenta() != null && !request.getNumeroCuenta().trim().isEmpty();
+
+        if (!tieneCurp && !tieneRfc && !tieneCorreo && !tieneCuenta) {
+            throw new ReglaNegocioException("Debe ingresar al menos un criterio de busqueda (RFC, CURP, correo electronico o numero de cuenta)");
+        }
+
+        Map<Long, Cliente> clientesMap = new LinkedHashMap<>();
+
+        if (tieneCurp) {
+            clienteRepository.findByCurpIgnoreCase(request.getCurp().trim())
+                    .ifPresent(c -> clientesMap.put(c.getIdCliente(), c));
+        }
+        if (tieneRfc) {
+            clienteRepository.findByRfcIgnoreCase(request.getRfc().trim())
+                    .ifPresent(c -> clientesMap.put(c.getIdCliente(), c));
+        }
+        if (tieneCorreo) {
+            clienteRepository.findByCorreoElectronicoIgnoreCase(request.getCorreoElectronico().trim())
+                    .ifPresent(c -> clientesMap.put(c.getIdCliente(), c));
+        }
+        if (tieneCuenta) {
+            clienteRepository.findByCuentasNumeroCuenta(request.getNumeroCuenta().trim())
+                    .ifPresent(c -> clientesMap.put(c.getIdCliente(), c));
+        }
+
+        if (clientesMap.isEmpty()) {
+            throw new ClienteNoEncontradoException("No se encontro ningun cliente con los criterios proporcionados");
+        }
+
+        return clientesMap.values().stream().map(c -> {
+            ClienteResponse resp = mapearAClienteResponse(c);
+            resp.setIdCliente(null);
+            if (resp.getCuentas() != null) {
+                resp.getCuentas().forEach(cta -> cta.setIdCliente(null));
+            }
+            return resp;
+        }).collect(Collectors.toList());
     }
 
     @Override
@@ -348,6 +416,74 @@ public class ClienteServiceImpl implements ClienteService {
         cliente.setActivo(true);
         cliente.getCuentas().forEach(cuenta -> cuenta.setEstatus("ACTIVA"));
         return mapearAClienteResponse(clienteRepository.save(cliente));
+    }
+
+    @Override
+    @Transactional
+    public ClienteResponse actualizarCompletoPorIdentificador(String identificador, ClienteRegistroRequest request) {
+        Cliente cliente = buscarClienteEntidadPorIdentificador(identificador);
+        return actualizarCompleto(cliente.getIdCliente(), request);
+    }
+
+    @Override
+    @Transactional
+    public ClienteResponse actualizarParcialPorIdentificador(String identificador, ClientePatchRequest request) {
+        Cliente cliente = buscarClienteEntidadPorIdentificador(identificador);
+        return actualizarParcial(cliente.getIdCliente(), request);
+    }
+
+    @Override
+    @Transactional
+    public void desactivarClientePorIdentificador(String identificador) {
+        Cliente cliente = buscarClienteEntidadPorIdentificador(identificador);
+        desactivarCliente(cliente.getIdCliente());
+    }
+
+    @Override
+    @Transactional
+    public ClienteResponse reactivarClientePorIdentificador(String identificador) {
+        Cliente cliente = buscarClienteEntidadPorIdentificador(identificador);
+        return reactivarCliente(cliente.getIdCliente());
+    }
+
+    private Cliente buscarClienteEntidadPorIdentificador(String criterio) {
+        if (criterio == null || criterio.trim().isEmpty()) {
+            throw new ReglaNegocioException("Debe proporcionar un identificador valido (RFC, CURP, correo electronico o numero de cuenta)");
+        }
+        String valor = criterio.trim();
+
+        // 1. Intentar por CURP (exactamente 18 caracteres)
+        Optional<Cliente> opt = clienteRepository.findByCurpIgnoreCase(valor);
+        if (opt.isPresent()) return opt.get();
+
+        // 2. Intentar por RFC (12 o 13 caracteres)
+        opt = clienteRepository.findByRfcIgnoreCase(valor);
+        if (opt.isPresent()) return opt.get();
+
+        // 3. Intentar por correo si contiene '@'
+        if (valor.contains("@")) {
+            opt = clienteRepository.findByCorreoElectronicoIgnoreCase(valor);
+            if (opt.isPresent()) return opt.get();
+        }
+
+        // 4. Intentar por numero de cuenta
+        opt = clienteRepository.findByCuentasNumeroCuenta(valor);
+        if (opt.isPresent()) return opt.get();
+
+        // 5. Fallback por correo electronico sin '@'
+        opt = clienteRepository.findByCorreoElectronicoIgnoreCase(valor);
+        if (opt.isPresent()) return opt.get();
+
+        // 6. Si es numerico, intentar por ID
+        if (valor.matches("^\\d+$")) {
+            try {
+                Long id = Long.parseLong(valor);
+                opt = clienteRepository.findById(id);
+                if (opt.isPresent()) return opt.get();
+            } catch (NumberFormatException ignored) {}
+        }
+
+        throw new ClienteNoEncontradoException("No se encontro cliente con el identificador proporcionado: " + valor);
     }
 
     // --- Métodos Auxiliares y Validaciones ---

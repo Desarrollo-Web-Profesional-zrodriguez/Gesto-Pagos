@@ -10,8 +10,11 @@ import com.proyecto.servicios.entity.cliente.Cliente;
 public interface  ClienteRepository extends JpaRepository<Cliente, Long> {
     // consultas solicitadas
     Optional<Cliente> findByCurp(String curp);
+    Optional<Cliente> findByCurpIgnoreCase(String curp);
     Optional<Cliente> findByRfc(String rfc);
+    Optional<Cliente> findByRfcIgnoreCase(String rfc);
     Optional<Cliente> findByCorreoElectronico(String correoElectronico);
+    Optional<Cliente> findByCorreoElectronicoIgnoreCase(String correoElectronico);
     List<Cliente> findByActivoTrue();
     List<Cliente> findByFechaCreacionBetween(LocalDateTime fechaInicio, LocalDateTime fechaFin);
     // Consulta para obtener cliente a partir del número de cuenta asociada
