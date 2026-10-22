@@ -168,48 +168,61 @@ public class ClienteServiceImpl implements ClienteService {
     @Transactional(readOnly = true)
     public List<ClienteResponse> busquedaAvanzada(ClienteBusquedaAvanzadaRequest request) {
         if (request == null) {
-            throw new ReglaNegocioException("Debe ingresar al menos un criterio de busqueda (CURP, RFC, correo electronico o numero de cuenta)");
+            return obtenerTodos();
         }
+        boolean tieneIdentificador = request.getIdentificador() != null && !request.getIdentificador().trim().isEmpty();
         boolean tieneCurp = request.getCurp() != null && !request.getCurp().trim().isEmpty();
         boolean tieneRfc = request.getRfc() != null && !request.getRfc().trim().isEmpty();
         boolean tieneCorreo = request.getCorreoElectronico() != null && !request.getCorreoElectronico().trim().isEmpty();
         boolean tieneCuenta = request.getNumeroCuenta() != null && !request.getNumeroCuenta().trim().isEmpty();
+        boolean tieneActivo = request.getActivo() != null;
+        boolean tieneFechas = request.getFechaInicio() != null && request.getFechaFin() != null;
 
-        if (!tieneCurp && !tieneRfc && !tieneCorreo && !tieneCuenta) {
-            throw new ReglaNegocioException("Debe ingresar al menos un criterio de busqueda (CURP, RFC, correo electronico o numero de cuenta)");
+        if (!tieneIdentificador && !tieneCurp && !tieneRfc && !tieneCorreo && !tieneCuenta && !tieneActivo && !tieneFechas) {
+            return obtenerTodos();
         }
 
         Map<Long, Cliente> clientesMap = new LinkedHashMap<>();
 
-        // 1. Coincidencia por CURP (exacta o parcial)
+        if (tieneIdentificador) {
+            try {
+                Cliente c = buscarClienteEntidadPorIdentificador(request.getIdentificador().trim());
+                clientesMap.put(c.getIdCliente(), c);
+            } catch (Exception ignored) {
+            }
+        }
         if (tieneCurp) {
             clienteRepository.findByCurpContainingIgnoreCase(request.getCurp().trim())
                     .forEach(c -> clientesMap.put(c.getIdCliente(), c));
         }
-
-        // 3. Coincidencia por RFC (exacta o parcial)
         if (tieneRfc) {
             clienteRepository.findByRfcContainingIgnoreCase(request.getRfc().trim())
                     .forEach(c -> clientesMap.put(c.getIdCliente(), c));
         }
-
-        // 4. Coincidencia por Correo Electrónico (exacta o parcial)
         if (tieneCorreo) {
             clienteRepository.findByCorreoElectronicoContainingIgnoreCase(request.getCorreoElectronico().trim())
                     .forEach(c -> clientesMap.put(c.getIdCliente(), c));
         }
-
-        // 5. Coincidencia por Número de Cuenta (exacta o parcial)
         if (tieneCuenta) {
             clienteRepository.buscarPorNumeroCuentaContaining(request.getNumeroCuenta().trim())
                     .forEach(c -> clientesMap.put(c.getIdCliente(), c));
         }
+        if (clientesMap.isEmpty() && (tieneActivo || tieneFechas)) {
+            clienteRepository.findAll().forEach(c -> clientesMap.put(c.getIdCliente(), c));
+        }
 
-        if (clientesMap.isEmpty()) {
+        List<Cliente> resultado = clientesMap.values().stream()
+                .filter(c -> !tieneActivo || request.getActivo().equals(c.getActivo()))
+                .filter(c -> !tieneFechas || (c.getFechaCreacion() != null 
+                        && !c.getFechaCreacion().toLocalDate().isBefore(request.getFechaInicio())
+                        && !c.getFechaCreacion().toLocalDate().isAfter(request.getFechaFin())))
+                .collect(Collectors.toList());
+
+        if (resultado.isEmpty()) {
             throw new ClienteNoEncontradoException("No se encontro ningun cliente con los criterios proporcionados");
         }
 
-        return clientesMap.values().stream().map(c -> {
+        return resultado.stream().map(c -> {
             ClienteResponse resp = mapearAClienteResponse(c);
             resp.setIdCliente(null);
             if (resp.getCuentas() != null) {
@@ -378,9 +391,12 @@ public class ClienteServiceImpl implements ClienteService {
 
         if (request.getActivo() != null) {
             cliente.setActivo(request.getActivo());
-            // Si se desactiva, suspender cuentas asociadas
-            if (Boolean.FALSE.equals(request.getActivo())) {
-                cliente.getCuentas().forEach(c -> c.setEstatus("INACTIVA"));
+            if (cliente.getCuentas() != null) {
+                if (Boolean.FALSE.equals(request.getActivo())) {
+                    cliente.getCuentas().forEach(c -> c.setEstatus("INACTIVA"));
+                } else if (Boolean.TRUE.equals(request.getActivo())) {
+                    cliente.getCuentas().forEach(c -> c.setEstatus("ACTIVA"));
+                }
             }
         }
 
@@ -475,16 +491,28 @@ public class ClienteServiceImpl implements ClienteService {
 
     @Override
     @Transactional
-    public void desactivarClientePorIdentificador(String identificador) {
+    public ClienteResponse desactivarClientePorIdentificador(String identificador) {
         Cliente cliente = buscarClienteEntidadPorIdentificador(identificador);
         desactivarCliente(cliente.getIdCliente());
+        Cliente desactivado = clienteRepository.findById(cliente.getIdCliente()).orElse(cliente);
+        ClienteResponse resp = mapearAClienteResponse(desactivado);
+        resp.setIdCliente(null);
+        if (resp.getCuentas() != null) {
+            resp.getCuentas().forEach(c -> c.setIdCliente(null));
+        }
+        return resp;
     }
 
     @Override
     @Transactional
     public ClienteResponse reactivarClientePorIdentificador(String identificador) {
         Cliente cliente = buscarClienteEntidadPorIdentificador(identificador);
-        return reactivarCliente(cliente.getIdCliente());
+        ClienteResponse resp = reactivarCliente(cliente.getIdCliente());
+        resp.setIdCliente(null);
+        if (resp.getCuentas() != null) {
+            resp.getCuentas().forEach(c -> c.setIdCliente(null));
+        }
+        return resp;
     }
 
     private Cliente buscarClienteEntidadPorIdentificador(String criterio) {
@@ -515,16 +543,7 @@ public class ClienteServiceImpl implements ClienteService {
         opt = clienteRepository.findByCorreoElectronicoIgnoreCase(valor);
         if (opt.isPresent()) return opt.get();
 
-        // 6. Si es numerico, intentar por ID
-        if (valor.matches("^\\d+$")) {
-            try {
-                Long id = Long.parseLong(valor);
-                opt = clienteRepository.findById(id);
-                if (opt.isPresent()) return opt.get();
-            } catch (NumberFormatException ignored) {}
-        }
-
-        // 7. Intentar por coincidencia de nombre o apellidos
+        // 6. Intentar por coincidencia de nombre o apellidos
         List<Cliente> porNombre = clienteRepository.buscarPorNombreOCoincidencia(valor);
         if (!porNombre.isEmpty()) {
             return porNombre.get(0);
