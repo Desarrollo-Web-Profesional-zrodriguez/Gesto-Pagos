@@ -50,7 +50,7 @@ public interface ClienteService {
     // 4. Baja Lógica
     void desactivarCliente(Long id);
 
-    void desactivarClientePorIdentificador(String identificador);
+    ClienteResponse desactivarClientePorIdentificador(String identificador);
 
     ClienteResponse reactivarCliente(Long id);
 

@@ -11,9 +11,12 @@ plugins {
 group 'com.proyecto.servicio'
 version '1.0'
 
-java{
-    sourceCompatibility=21
-    targetCompatibility=21
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
 }
 
 repositories {
@@ -102,6 +105,10 @@ test {
 springBoot {
     buildInfo {
     }
+}
+
+bootRun {
+    systemProperty 'java.net.preferIPv4Stack', 'true'
 }
 
 sonarqube {
