@@ -30,5 +30,5 @@ COPY --from=builder /app/build/libs/*.jar app.jar
 ENV PORT=8080
 EXPOSE 8080
 
-# Iniciar la aplicación respetando el puerto inyectado por Railway
-ENTRYPOINT ["sh", "-c", "java -Dserver.port=${PORT:-8080} -jar app.jar"]
+# Iniciar la aplicación optimizada para contenedores en la nube (Render / Railway)
+ENTRYPOINT ["sh", "-c", "java -XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -Djava.net.preferIPv4Stack=true -Dserver.port=${PORT:-8080} -jar app.jar"]
