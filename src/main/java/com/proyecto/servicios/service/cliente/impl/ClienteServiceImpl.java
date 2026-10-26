@@ -179,17 +179,34 @@ public class ClienteServiceImpl implements ClienteService {
         boolean tieneFechas = request.getFechaInicio() != null && request.getFechaFin() != null;
 
         if (!tieneIdentificador && !tieneCurp && !tieneRfc && !tieneCorreo && !tieneCuenta && !tieneActivo && !tieneFechas) {
-            return obtenerTodos();
+            return obtenerTodos().stream().map(resp -> {
+                resp.setIdCliente(null);
+                if (resp.getCuentas() != null) {
+                    resp.getCuentas().forEach(cta -> cta.setIdCliente(null));
+                }
+                return resp;
+            }).collect(Collectors.toList());
         }
 
         Map<Long, Cliente> clientesMap = new LinkedHashMap<>();
 
         if (tieneIdentificador) {
+            String idVal = request.getIdentificador().trim();
             try {
-                Cliente c = buscarClienteEntidadPorIdentificador(request.getIdentificador().trim());
+                Cliente c = buscarClienteEntidadPorIdentificador(idVal);
                 clientesMap.put(c.getIdCliente(), c);
             } catch (Exception ignored) {
             }
+            clienteRepository.findByCurpContainingIgnoreCase(idVal)
+                    .forEach(c -> clientesMap.put(c.getIdCliente(), c));
+            clienteRepository.findByRfcContainingIgnoreCase(idVal)
+                    .forEach(c -> clientesMap.put(c.getIdCliente(), c));
+            clienteRepository.findByCorreoElectronicoContainingIgnoreCase(idVal)
+                    .forEach(c -> clientesMap.put(c.getIdCliente(), c));
+            clienteRepository.buscarPorNumeroCuentaContaining(idVal)
+                    .forEach(c -> clientesMap.put(c.getIdCliente(), c));
+            clienteRepository.buscarPorNombreOCoincidencia(idVal)
+                    .forEach(c -> clientesMap.put(c.getIdCliente(), c));
         }
         if (tieneCurp) {
             clienteRepository.findByCurpContainingIgnoreCase(request.getCurp().trim())
@@ -583,9 +600,13 @@ public class ClienteServiceImpl implements ClienteService {
     private String generarNumeroCuentaUnico() {
         String numCuenta;
         do {
-            // Genera número de 10 dígitos (ej. 1000000000 a 9999999999)
-            long numero = 1000000000L + (long) (RANDOM.nextDouble() * 8999999999L);
-            numCuenta = String.valueOf(numero);
+            // Genera número de 16 dígitos numéricos (ej. 1000000000000000 a 9999999999999999)
+            StringBuilder sb = new StringBuilder(16);
+            sb.append(1 + RANDOM.nextInt(9)); // Primer dígito entre 1 y 9
+            for (int i = 1; i < 16; i++) {
+                sb.append(RANDOM.nextInt(10));
+            }
+            numCuenta = sb.toString();
         } while (cuentaRepository.existsByNumeroCuenta(numCuenta));
         return numCuenta;
     }

@@ -36,9 +36,9 @@ public class CuentaController {
     @GetMapping("/{numeroCuenta}")
     @Operation(summary = "Consultar cuenta por su numero unico")
     public ResponseEntity<CuentaResponse> obtenerPorNumeroCuenta(
-            @Parameter(description = "Numero de cuenta bancaria (10 digitos)", example = "1000000001") 
+            @Parameter(description = "Numero de cuenta bancaria (16 digitos)", example = "1000000001000000") 
             @PathVariable 
-            @Pattern(regexp = "^\\d{10}$", message = "El numero de cuenta debe tener exactamente 10 digitos numericos") 
+            @Pattern(regexp = "^\\d{16}$", message = "El numero de cuenta debe tener exactamente 16 digitos numericos") 
             String numeroCuenta) {
         return ResponseEntity.ok(cuentaService.obtenerPorNumeroCuenta(numeroCuenta));
     }
@@ -54,9 +54,9 @@ public class CuentaController {
     @GetMapping("/{numeroCuenta}/saldo")
     @Operation(summary = "Consultar saldo disponible y contable de una cuenta")
     public ResponseEntity<SaldoResponse> obtenerSaldoPorNumeroCuenta(
-            @Parameter(description = "Numero de cuenta bancaria (10 digitos)", example = "1000000001") 
+            @Parameter(description = "Numero de cuenta bancaria (16 digitos)", example = "1000000001000000") 
             @PathVariable 
-            @Pattern(regexp = "^\\d{10}$", message = "El numero de cuenta debe tener exactamente 10 digitos numericos") 
+            @Pattern(regexp = "^\\d{16}$", message = "El numero de cuenta debe tener exactamente 16 digitos numericos") 
             String numeroCuenta) {
         return ResponseEntity.ok(cuentaService.obtenerSaldoPorNumeroCuenta(numeroCuenta));
     }

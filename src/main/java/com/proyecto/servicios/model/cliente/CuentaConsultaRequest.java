@@ -18,7 +18,7 @@ import lombok.Setter;
 public class CuentaConsultaRequest {
 
     @NotBlank(message = "El numero de cuenta es obligatorio")
-    @Pattern(regexp = "^\\d{10}$", message = "El numero de cuenta debe tener exactamente 10 digitos numericos")
-    @Schema(description = "Numero de cuenta bancaria a 10 digitos", example = "1000000001")
+    @Pattern(regexp = "^\\d{16}$", message = "El numero de cuenta debe tener exactamente 16 digitos numericos")
+    @Schema(description = "Numero de cuenta bancaria a 16 digitos", example = "8324433882000000")
     private String numeroCuenta;
 }
