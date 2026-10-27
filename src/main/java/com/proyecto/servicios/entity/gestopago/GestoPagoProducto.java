@@ -64,6 +64,9 @@ public class GestoPagoProducto {
     @Column(name = "legend", columnDefinition = "TEXT")
     private String legend;
 
+    @Column(name = "url_logo", length = 500)
+    private String urlLogo;
+
     @Column(name = "fecha_actualizacion", nullable = false)
     private LocalDateTime fechaActualizacion;
 

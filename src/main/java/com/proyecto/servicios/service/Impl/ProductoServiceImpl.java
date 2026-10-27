@@ -16,9 +16,11 @@ import feign.RetryableException;
 import jakarta.xml.bind.JAXBContext;
 import jakarta.xml.bind.Unmarshaller;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
+import com.proyecto.servicios.util.LogoServicioResolver;
 import java.io.StringReader;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -36,6 +38,7 @@ public class ProductoServiceImpl implements ProductoService {
     private final RedisTemplate<String, Object> redisTemplate;
     private final GestoPagoProductoRepository productoRepository;
     private final GestoPagoProductoMapper productoMapper;
+    private final LogoServicioResolver logoServicioResolver;
     private final ObjectMapper objectMapper;
 
     @Value("${gestopago.redis.catalogo-key:gestopago:catalogo:productos_por_tipo_front}")
@@ -46,11 +49,22 @@ public class ProductoServiceImpl implements ProductoService {
                                RedisTemplate<String, Object> redisTemplate,
                                GestoPagoProductoRepository productoRepository,
                                GestoPagoProductoMapper productoMapper) {
+        this(productClient, tokenService, redisTemplate, productoRepository, productoMapper, new com.proyecto.servicios.util.LogoServicioResolver());
+    }
+
+    @Autowired
+    public ProductoServiceImpl(GestoPagoProductClient productClient,
+                               GestoPagoTokenService tokenService,
+                               RedisTemplate<String, Object> redisTemplate,
+                               GestoPagoProductoRepository productoRepository,
+                               GestoPagoProductoMapper productoMapper,
+                               LogoServicioResolver logoServicioResolver) {
         this.productClient = productClient;
         this.tokenService = tokenService;
         this.redisTemplate = redisTemplate;
         this.productoRepository = productoRepository;
         this.productoMapper = productoMapper;
+        this.logoServicioResolver = logoServicioResolver != null ? logoServicioResolver : new com.proyecto.servicios.util.LogoServicioResolver();
         this.objectMapper = new ObjectMapper();
     }
 
@@ -119,6 +133,11 @@ public class ProductoServiceImpl implements ProductoService {
                 );
 
                 if (!categorias.isEmpty()) {
+                    categorias.values().forEach(list -> list.forEach(p -> {
+                        if (p.getUrlLogo() == null || p.getUrlLogo().trim().isEmpty()) {
+                            p.setUrlLogo(logoServicioResolver.resolverUrlLogo(p.getServicio(), p.getProducto(), p.getIdServicio(), p.getIdProducto()));
+                        }
+                    }));
                     // Garantizar orden de menor a mayor en las categorías (0, 1, 2...)
                     Map<Integer, List<ProductItemDto>> categoriasOrdenadas = new TreeMap<>(categorias);
                     int total = categoriasOrdenadas.values().stream().mapToInt(List::size).sum();
@@ -144,10 +163,13 @@ public class ProductoServiceImpl implements ProductoService {
             // Usamos MapStruct para convertir de Entidad a DTO
             List<ProductItemDto> dtos = productoMapper.toDtoList(productosBD);
 
-            // Normalizar categoría 0 si viene sin tipoFront
+            // Normalizar categoría 0 si viene sin tipoFront y resolver urlLogo
             dtos.forEach(p -> {
                 if (p.getTipoFront() == null) {
                     p.setTipoFront(0);
+                }
+                if (p.getUrlLogo() == null || p.getUrlLogo().trim().isEmpty()) {
+                    p.setUrlLogo(logoServicioResolver.resolverUrlLogo(p.getServicio(), p.getProducto(), p.getIdServicio(), p.getIdProducto()));
                 }
             });
 
@@ -200,6 +222,13 @@ public class ProductoServiceImpl implements ProductoService {
         }
 
         int total = (response.getProductos() != null) ? response.getProductos().size() : 0;
+        if (response.getProductos() != null) {
+            response.getProductos().forEach(p -> {
+                if (p.getUrlLogo() == null || p.getUrlLogo().trim().isEmpty()) {
+                    p.setUrlLogo(logoServicioResolver.resolverUrlLogo(p.getServicio(), p.getProducto(), p.getIdServicio(), p.getIdProducto()));
+                }
+            });
+        }
         log.info("Invocacion finalizada exitosamente. Total productos recibidos: {}", total);
 
         return response;
