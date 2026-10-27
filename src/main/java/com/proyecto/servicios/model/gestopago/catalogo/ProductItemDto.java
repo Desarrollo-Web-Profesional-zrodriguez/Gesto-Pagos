@@ -69,4 +69,8 @@ public class ProductItemDto implements Serializable {
     @JsonProperty("legend")
     @XmlElement(name = "legend")
     private String legend;
+
+    @JsonProperty("urlLogo")
+    @XmlAttribute(name = "urlLogo")
+    private String urlLogo;
 }

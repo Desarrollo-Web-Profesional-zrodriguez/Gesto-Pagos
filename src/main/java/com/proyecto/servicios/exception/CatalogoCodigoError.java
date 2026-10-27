@@ -28,6 +28,8 @@ public enum CatalogoCodigoError {
     GESTOPAGO_08_ERROR_PROVEEDOR_FINAL(8, "08", "GESTOPAGO", "Error de comunicacion con el proveedor final del servicio", HttpStatus.BAD_GATEWAY),
     GESTOPAGO_09_DISTRIBUIDOR_NO_AUTORIZADO(9, "09", "GESTOPAGO", "Distribuidor inactivo o no autorizado en GestoPago", HttpStatus.BAD_REQUEST),
     GESTOPAGO_RECHAZO_GENERICO(99, "99", "GESTOPAGO", "Transaccion rechazada por el proveedor GestoPago", HttpStatus.BAD_REQUEST),
+    // Falla de integración (IP/origen no autorizado en el proveedor): no es culpa del cliente final
+    GESTOPAGO_55_ORIGEN_NO_AUTORIZADO(55, "55", "GESTOPAGO", "El servicio de pagos no se encuentra disponible temporalmente. Intente mas tarde", HttpStatus.BAD_GATEWAY),
 
     // =========================================================================
     // 100 - 199: VALIDACIÓN DE DATOS DE ENTRADA Y CATÁLOGO DE PRODUCTOS
@@ -36,13 +38,16 @@ public enum CatalogoCodigoError {
     SERVICIO_NO_EXISTE(101, null, "VALIDACION_INTERNA", "El idServicio proporcionado no existe en el catalogo /productos", HttpStatus.NOT_FOUND),
     PRODUCTO_NO_EXISTE(102, null, "VALIDACION_INTERNA", "El idProducto proporcionado no existe o no pertenece al idServicio en /productos", HttpStatus.NOT_FOUND),
     CATALOGO_NO_DISPONIBLE(103, null, "VALIDACION_INTERNA", "El catalogo de productos (/productos) no se encuentra disponible", HttpStatus.SERVICE_UNAVAILABLE),
+    TRANSACCION_NO_ENCONTRADA(104, null, "VALIDACION_INTERNA", "No se encontro ninguna transaccion con el UPC proporcionado", HttpStatus.NOT_FOUND),
+    MONTO_NO_PERMITIDO(105, null, "VALIDACION_INTERNA", "El monto no corresponde con los valores permitidos para el producto", HttpStatus.UNPROCESSABLE_ENTITY),
 
     // =========================================================================
     // 200 - 299: VALIDACIONES DE CUENTA BANCARIA Y SALDOS DEL CLIENTE
     // =========================================================================
     CUENTA_NO_ENCONTRADA(201, null, "VALIDACION_INTERNA", "No se encontro ninguna cuenta bancaria con el numero de 16 digitos proporcionado", HttpStatus.NOT_FOUND),
     CUENTA_INACTIVA(202, null, "VALIDACION_INTERNA", "La cuenta bancaria del cliente no se encuentra activa", HttpStatus.BAD_REQUEST),
-    SALDO_INSUFICIENTE(203, null, "VALIDACION_INTERNA", "Saldo disponible insuficiente en la cuenta bancaria del cliente", HttpStatus.BAD_REQUEST),
+    SALDO_INSUFICIENTE(203, null, "VALIDACION_INTERNA", "Saldo disponible insuficiente en la cuenta bancaria del cliente", HttpStatus.UNPROCESSABLE_ENTITY),
+    SOLICITUD_DUPLICADA(204, null, "VALIDACION_INTERNA", "Ya existe una solicitud equivalente registrada", HttpStatus.CONFLICT),
 
     // =========================================================================
     // 300 - 399: VALIDACIONES DE CLIENTE TITULAR Y ONBOARDING
@@ -63,9 +68,12 @@ public enum CatalogoCodigoError {
     // =========================================================================
     // 500 - 599: ERRORES TÉCNICOS, CIFRADO AES Y COMUNICACIÓN EXTERNA
     // =========================================================================
+    ERROR_INTERNO(500, null, "SISTEMA_INTERNO", "Ocurrio un error interno. Intente nuevamente mas tarde", HttpStatus.INTERNAL_SERVER_ERROR),
     ERROR_CIFRADO_AES(501, null, "SISTEMA_INTERNO", "Error al cifrar el payload con AES-256-CBC para GestoPago", HttpStatus.INTERNAL_SERVER_ERROR),
     ERROR_COMUNICACION_GESTOPAGO(502, null, "COMUNICACION_GESTOPAGO", "Error de comunicacion al invocar el servicio sendTx.do de GestoPago", HttpStatus.BAD_GATEWAY),
     TOKEN_GESTOPAGO_INVALIDO(503, null, "COMUNICACION_GESTOPAGO", "No fue posible obtener un token valido de autenticacion para GestoPago", HttpStatus.BAD_GATEWAY),
+    // 202: la operacion fue aceptada pero su resultado final aun se esta verificando con el proveedor
+    PAGO_PENDIENTE_CONCILIACION(504, null, "COMUNICACION_GESTOPAGO", "El resultado del pago esta siendo verificado con el proveedor. No reintente la operacion", HttpStatus.ACCEPTED),
 
     // =========================================================================
     // 999: REGLA DE NEGOCIO GENERAL

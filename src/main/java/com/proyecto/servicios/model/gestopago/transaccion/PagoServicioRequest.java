@@ -78,4 +78,10 @@ public class PagoServicioRequest {
         example = "[0.12, -0.45, 0.89, -0.05, 0.67]"
     )
     private String codigo2fa;
+
+    @jakarta.validation.constraints.Email(message = "El formato del correo electronico proporcionado para el comprobante es invalido")
+    @JsonProperty("correoElectronico")
+    @JsonAlias({"correoElectronico", "correo", "email"})
+    @Schema(description = "Correo electronico opcional para el envio del comprobante (si no se proporciona se usara el registrado en el onboarding del cliente)", example = "cliente@example.com")
+    private String correoElectronico;
 }

@@ -3,12 +3,15 @@ package com.proyecto.servicios.entity.gestopago;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -57,12 +60,15 @@ public class GestoPagoTransaccion {
     @Column(name = "unidad", nullable = false, length = 25)
     private String unidad;
 
+    @JsonIgnore
     @Column(name = "payload_json", columnDefinition = "TEXT")
     private String payloadJson;
 
+    @JsonIgnore
     @Column(name = "payload_cifrado", columnDefinition = "TEXT")
     private String payloadCifrado;
 
+    @JsonIgnore
     @Column(name = "response_xml", columnDefinition = "TEXT")
     private String responseXml;
 
@@ -81,6 +87,7 @@ public class GestoPagoTransaccion {
     @Column(name = "comision", precision = 12, scale = 2)
     private BigDecimal comision;
 
+    @JsonIgnore
     @Column(name = "pin", length = 250)
     private String pin;
 
@@ -90,13 +97,38 @@ public class GestoPagoTransaccion {
     @Column(name = "estatus", nullable = false, length = 30)
     private String estatus;
 
+    @JsonIgnore
+    @Column(name = "idempotency_key", length = 80)
+    private String idempotencyKey;
+
+    @JsonIgnore
+    @Column(name = "huella", length = 64)
+    private String huella;
+
+    @Builder.Default
+    @Column(name = "intentos_conciliacion", nullable = false)
+    private Integer intentosConciliacion = 0;
+
     @Column(name = "fecha_creacion", nullable = false)
     private LocalDateTime fechaCreacion;
 
+    @Column(name = "fecha_actualizacion", nullable = false)
+    private LocalDateTime fechaActualizacion;
+
     @PrePersist
     void prePersist() {
+        LocalDateTime ahora = LocalDateTime.now();
         if (this.fechaCreacion == null) {
-            this.fechaCreacion = LocalDateTime.now();
+            this.fechaCreacion = ahora;
         }
+        this.fechaActualizacion = ahora;
+        if (this.intentosConciliacion == null) {
+            this.intentosConciliacion = 0;
+        }
+    }
+
+    @PreUpdate
+    void preUpdate() {
+        this.fechaActualizacion = LocalDateTime.now();
     }
 }

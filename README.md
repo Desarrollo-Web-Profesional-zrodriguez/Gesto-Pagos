@@ -164,3 +164,27 @@ curl -X GET "http://localhost:8080/auth/validar-sesion" \
 ```bash
 curl -X DELETE "http://localhost:8080/clientes/1"
 ```
+
+---
+
+## 6. Pagos GestoPago: diseño, riesgos y secretos
+
+### Secretos
+Ningún secreto vive en el repositorio. Define como variables de entorno: `DB_USERNAME`, `DB_PASSWORD`, `GESTOPAGO_CODIGO_DISPOSITIVO`, `GESTOPAGO_AUTH_PASSWORD`, `GESTOPAGO_AES_SECRET_KEY`, `GESTOPAGO_AES_IV`, `BREVO_API_KEY`. En local se leen de `config/application.properties` (ignorado por git).
+
+### Flujo de `POST /pagos`
+1. Validación: catálogo (servicio/producto/monto), cuenta activa, cliente activo, 2FA.
+2. Cifrado AES del payload (antes de tocar el saldo).
+3. Reserva atómica: bloqueo pesimista del saldo, anti-duplicados, saldo suficiente, retención y registro `PROCESANDO` en un solo commit.
+4. Llamada a `sendTx.do` **sin transacción abierta**, con timeouts y sin reintentos automáticos.
+5. Cierre según veredicto:
+   - `01` -> confirma el cargo (`EXITOSA`).
+   - Rechazo explícito del proveedor -> libera la retención (`RECHAZADA`).
+   - Timeout, 5xx, `07`/`08` o respuesta ilegible -> `PENDIENTE_CONCILIACION`, dinero retenido, HTTP 202.
+6. Un job concilia pendientes reutilizando el mismo UPC; `06` o intentos agotados pasan a `REVISION_MANUAL`.
+
+Cabecera opcional `Idempotency-Key` (8-64 caracteres). Consulta de estatus: `GET /pagos/estatus/{upc}`.
+
+### Códigos HTTP
+`400` datos inválidos · `401/403` 2FA/usuario · `404` recurso inexistente · `409` solicitud duplicada · `422` saldo insuficiente / monto no permitido · `202` pendiente de conciliación · `502` falla del proveedor (incluye `55` IP no autorizada) · `500` error interno genérico.
+

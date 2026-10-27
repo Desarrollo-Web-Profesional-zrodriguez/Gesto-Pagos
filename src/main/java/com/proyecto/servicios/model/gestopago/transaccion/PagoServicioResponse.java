@@ -83,4 +83,13 @@ public class PagoServicioResponse {
 
     @Schema(description = "Fecha de operacion reportada por GestoPago", example = "23/Oct/2026 18:45:01")
     private String fechaProveedor;
+
+    @Schema(description = "URL del logotipo del servicio o proveedor", example = "https://upload.wikimedia.org/wikipedia/commons/thumb/6/66/Logo_Izzi_Telecom.png/320px-Logo_Izzi_Telecom.png")
+    private String urlLogo;
+
+    @Schema(description = "Indica si el comprobante digital fue enviado exitosamente al correo del cliente", example = "true")
+    private Boolean emailEnviado;
+
+    @Schema(description = "Identificador del correo enviado en Brevo (messageId)", example = "<20261026192649.12345@smtp-relay.brevo.com>")
+    private String emailMessageId;
 }

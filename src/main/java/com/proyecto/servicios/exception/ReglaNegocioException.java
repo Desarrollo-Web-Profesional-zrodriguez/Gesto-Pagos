@@ -42,9 +42,9 @@ public class ReglaNegocioException extends RuntimeException {
             } catch (NumberFormatException ignored) {
             }
         }
-        String detalleLimpio = (textoProveedor != null && !textoProveedor.trim().isEmpty())
-                ? textoProveedor.trim().replaceAll("\\s*\\n\\s*", " | ")
-                : entradaCatalogo.getDescripcion();
-        return new ReglaNegocioException(entradaCatalogo, codigoNumerico, codigoGp != null ? codigoGp.trim() : null, detalleLimpio);
+        // El texto crudo del proveedor NO se expone al cliente (puede contener IPs, rutas o datos internos);
+        // se registra en bitácora/BD y aquí se responde con la descripción controlada del catálogo.
+        return new ReglaNegocioException(entradaCatalogo, codigoNumerico, codigoGp != null ? codigoGp.trim() : null,
+                entradaCatalogo.getDescripcion());
     }
 }

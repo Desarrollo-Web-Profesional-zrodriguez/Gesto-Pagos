@@ -3,15 +3,22 @@ package com.proyecto.servicios.exception;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-import org.springframework.http.HttpStatus;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import com.proyecto.servicios.model.GenericResponse;
 
+import feign.FeignException;
+import jakarta.validation.ConstraintViolationException;
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -92,7 +99,8 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Reglas de negocio (Saldo insuficiente, Cuenta/Cliente inactivo) y Rechazos directos de GestoPago (Códigos 02..99)
+     * Reglas de negocio (Saldo insuficiente, Cuenta/Cliente inactivo, monto no permitido, pago pendiente)
+     * y rechazos de GestoPago. El HTTP status proviene del catálogo (422, 502, 202, ...).
      */
     @ExceptionHandler(ReglaNegocioException.class)
     public ResponseEntity<GenericResponse> handleReglaNegocio(ReglaNegocioException ex) {
@@ -108,15 +116,61 @@ public class GlobalExceptionHandler {
                 .origen(cat.getOrigen())
                 .mensaje(ex.getMessage())
                 .build();
-        return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
+        return new ResponseEntity<>(response, cat.getHttpStatus());
     }
 
     /**
-     * Fallback para cualquier otra RuntimeException no clasificada
+     * Solicitud duplicada (misma Idempotency-Key o misma operacion reciente) -> 409 Conflict
+     */
+    @ExceptionHandler(SolicitudDuplicadaException.class)
+    public ResponseEntity<GenericResponse> handleSolicitudDuplicada(SolicitudDuplicadaException ex) {
+        return construirRespuestaCatalogo(CatalogoCodigoError.SOLICITUD_DUPLICADA, ex.getMessage());
+    }
+
+    /**
+     * Violacion de unicidad en BD (ultima barrera contra duplicados concurrentes) -> 409 sin detalles de SQL
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<GenericResponse> handleIntegridadDatos(DataIntegrityViolationException ex) {
+        log.warn("[Handler]: Violacion de integridad de datos: {}", ex.getClass().getSimpleName());
+        return construirRespuestaCatalogo(CatalogoCodigoError.SOLICITUD_DUPLICADA, null);
+    }
+
+    /**
+     * JSON malformado, tipos incorrectos o montos con formato invalido -> 400 sin reflejar el detalle del parser
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<GenericResponse> handleCuerpoIlegible(HttpMessageNotReadableException ex) {
+        return construirRespuestaCatalogo(CatalogoCodigoError.DATOS_ENTRADA_INVALIDOS,
+                "El cuerpo de la peticion es invalido o tiene un formato incorrecto");
+    }
+
+    /**
+     * Validaciones de parametros de ruta / cabeceras (@Validated) -> 400
+     */
+    @ExceptionHandler({ConstraintViolationException.class, MissingRequestHeaderException.class})
+    public ResponseEntity<GenericResponse> handleParametrosInvalidos(Exception ex) {
+        return construirRespuestaCatalogo(CatalogoCodigoError.DATOS_ENTRADA_INVALIDOS,
+                "Uno o mas parametros de la peticion no son validos");
+    }
+
+    /**
+     * Falla de un servicio externo no clasificado (catalogo, token) -> 502 sin exponer cuerpo del proveedor
+     */
+    @ExceptionHandler(FeignException.class)
+    public ResponseEntity<GenericResponse> handleFeign(FeignException ex) {
+        log.error("[Handler]: Error de comunicacion con servicio externo (HTTP {})", ex.status());
+        return construirRespuestaCatalogo(CatalogoCodigoError.ERROR_COMUNICACION_GESTOPAGO, null);
+    }
+
+    /**
+     * Fallback para cualquier otra RuntimeException no clasificada: el detalle va solo al log,
+     * jamas a la respuesta (podria contener SQL, rutas, credenciales o datos del cliente).
      */
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<GenericResponse> businessException(RuntimeException ex) {
-        return construirRespuestaCatalogo(CatalogoCodigoError.REGLA_NEGOCIO_GENERAL, ex.getMessage());
+        log.error("[Handler]: Error interno no controlado", ex);
+        return construirRespuestaCatalogo(CatalogoCodigoError.ERROR_INTERNO, null);
     }
 
     private ResponseEntity<GenericResponse> construirRespuestaCatalogo(CatalogoCodigoError cat, String mensaje) {
@@ -127,6 +181,6 @@ public class GlobalExceptionHandler {
                 .origen(cat.getOrigen())
                 .mensaje(mensaje != null ? mensaje : cat.getDescripcion())
                 .build();
-        return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
+        return new ResponseEntity<>(response, cat.getHttpStatus());
     }
 }
