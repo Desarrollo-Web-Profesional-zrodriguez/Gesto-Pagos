@@ -28,6 +28,8 @@ public enum CatalogoCodigoError {
     GESTOPAGO_08_ERROR_PROVEEDOR_FINAL(8, "08", "GESTOPAGO", "Error de comunicacion con el proveedor final del servicio", HttpStatus.BAD_GATEWAY),
     GESTOPAGO_09_DISTRIBUIDOR_NO_AUTORIZADO(9, "09", "GESTOPAGO", "Distribuidor inactivo o no autorizado en GestoPago", HttpStatus.BAD_REQUEST),
     GESTOPAGO_RECHAZO_GENERICO(99, "99", "GESTOPAGO", "Transaccion rechazada por el proveedor GestoPago", HttpStatus.BAD_REQUEST),
+    // Codigo 55 cuando el proveedor indica que la referencia no cumple el formato/digito verificador del servicio
+    GESTOPAGO_55_REFERENCIA_INVALIDA(55, "55", "GESTOPAGO", "La referencia de pago es invalida para el servicio solicitado. Favor de revisar", HttpStatus.BAD_REQUEST),
     // Falla de integración (IP/origen no autorizado en el proveedor): no es culpa del cliente final
     GESTOPAGO_55_ORIGEN_NO_AUTORIZADO(55, "55", "GESTOPAGO", "El servicio de pagos no se encuentra disponible temporalmente. Intente mas tarde", HttpStatus.BAD_GATEWAY),
 
