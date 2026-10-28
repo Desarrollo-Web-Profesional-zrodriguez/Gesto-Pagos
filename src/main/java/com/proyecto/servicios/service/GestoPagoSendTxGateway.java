@@ -39,8 +39,8 @@ import lombok.extern.slf4j.Slf4j;
 public class GestoPagoSendTxGateway {
 
     private static final String CODIGO_EXITO = "01";
-    /** Códigos del proveedor que significan "en proceso" o "falla aguas abajo": el resultado final es desconocido. */
-    private static final Set<String> CODIGOS_INDETERMINADOS = Set.of("07", "08");
+    /** Códigos del proveedor que significan "en proceso", "falla aguas abajo" o "timeout (82 -> requiere confirmTx)". */
+    private static final Set<String> CODIGOS_INDETERMINADOS = Set.of("07", "08", "82");
 
     private final GestoPagoTokenService tokenService;
     private final GestoPagoProductClient gestoPagoClient;

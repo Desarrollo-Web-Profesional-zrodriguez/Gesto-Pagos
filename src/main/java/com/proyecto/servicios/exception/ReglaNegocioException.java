@@ -35,6 +35,13 @@ public class ReglaNegocioException extends RuntimeException {
      */
     public static ReglaNegocioException desdeGestoPago(String codigoGp, String textoProveedor) {
         CatalogoCodigoError entradaCatalogo = CatalogoCodigoError.desdeCodigoGestoPago(codigoGp);
+        if ("55".equals(codigoGp != null ? codigoGp.trim() : null)) {
+            boolean esErrorReferencia = textoProveedor != null
+                    && textoProveedor.toLowerCase().contains("referencia");
+            entradaCatalogo = esErrorReferencia
+                    ? CatalogoCodigoError.GESTOPAGO_55_REFERENCIA_INVALIDA
+                    : CatalogoCodigoError.GESTOPAGO_55_ORIGEN_NO_AUTORIZADO;
+        }
         Integer codigoNumerico = entradaCatalogo.getCodigo();
         if (codigoGp != null) {
             try {

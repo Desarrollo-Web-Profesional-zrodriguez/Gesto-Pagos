@@ -315,9 +315,9 @@ class PagoServicioServiceImplTest {
     }
 
     @Test
-    @DisplayName("Producto de monto fijo: rechaza un monto distinto al precio del catalogo (monto manipulado)")
+    @DisplayName("Producto de monto fijo (tipoFront=1): rechaza un monto distinto al precio del catalogo (monto manipulado)")
     void testProcesarPago_MontoManipuladoContraPrecioFijo() {
-        configurarCatalogo(new BigDecimal("100.00"));
+        configurarCatalogo(1, new BigDecimal("100.00"));
         PagoServicioRequest request = requestValido(); // 150.00
 
         ReglaNegocioException ex = assertThrows(ReglaNegocioException.class, () -> pagoServicioService.procesarPago(request));
@@ -327,9 +327,9 @@ class PagoServicioServiceImplTest {
     }
 
     @Test
-    @DisplayName("Producto de monto fijo: acepta exactamente el precio del catalogo")
+    @DisplayName("Producto de monto fijo (tipoFront=1): acepta exactamente el precio del catalogo")
     void testProcesarPago_MontoIgualAPrecioFijo() {
-        configurarCatalogo(new BigDecimal("150.00"));
+        configurarCatalogo(1, new BigDecimal("150.00"));
         configurarClienteYCuentaActivos();
         when(ledger.reservar(any())).thenReturn(new Reserva(new BigDecimal("1000.00"), new BigDecimal("850.00")));
         when(sendTxGateway.ejecutar(anyString(), anyString())).thenReturn(respuestaExito());
@@ -337,6 +337,22 @@ class PagoServicioServiceImplTest {
                 .thenReturn(new SaldosFinales(new BigDecimal("850.00"), new BigDecimal("850.00")));
 
         assertEquals("01", pagoServicioService.procesarPago(requestValido()).getCodigo());
+    }
+
+    @Test
+    @DisplayName("Pago de servicios (tipoFront=2): el precio del catalogo es comision y permite pagar el monto del recibo")
+    void testProcesarPago_TipoFront2_PrecioEsComisionYPermiteMontoRecibo() {
+        configurarCatalogo(2, new BigDecimal("10.00"));
+        configurarClienteYCuentaActivos();
+        when(ledger.reservar(any())).thenReturn(new Reserva(new BigDecimal("1000.00"), new BigDecimal("398.01")));
+        when(sendTxGateway.ejecutar(anyString(), anyString())).thenReturn(respuestaExito());
+        when(ledger.confirmarExito(any(), any(), any()))
+                .thenReturn(new SaldosFinales(new BigDecimal("398.01"), new BigDecimal("398.01")));
+
+        PagoServicioRequest request = requestValido();
+        request.setMonto(new BigDecimal("601.99"));
+
+        assertEquals("01", pagoServicioService.procesarPago(request).getCodigo());
     }
 
     @Test
@@ -463,19 +479,23 @@ class PagoServicioServiceImplTest {
     }
 
     private void configurarCatalogo(BigDecimal precio) {
+        configurarCatalogo(2, precio);
+    }
+
+    private void configurarCatalogo(int tipoFront, BigDecimal precio) {
         ProductItemDto prod = ProductItemDto.builder()
                 .idServicio(76L)
                 .servicio("CFE")
                 .idProducto(205L)
                 .producto("Pago CFE")
-                .tipoFront(2)
+                .tipoFront(tipoFront)
                 .precio(precio)
                 .build();
 
         ProductCategorizedResponse catResp = ProductCategorizedResponse.builder()
                 .status(200)
                 .totalProductos(1)
-                .categorias(Map.of(2, List.of(prod)))
+                .categorias(Map.of(tipoFront, List.of(prod)))
                 .build();
 
         when(productoService.obtenerProductosCategorizados()).thenReturn(catResp);

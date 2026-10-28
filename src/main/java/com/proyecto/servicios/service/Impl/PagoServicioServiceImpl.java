@@ -137,16 +137,58 @@ public class PagoServicioServiceImpl implements PagoServicioService {
         // 6. Construir y cifrar el payload ANTES de tocar el saldo (si falla, no hay nada que revertir)
         String horaLocal = LocalDateTime.now().format(HORA_LOCAL_FORMATTER);
         String upc = RandomStringUtils.randomAlphanumeric(10);
-        String telefono = request.getTelefono().trim();
-        String referencia = request.getReferencia().trim();
+        boolean esTipoFront1 = Integer.valueOf(1).equals(productoCatalogo.getTipoFront());
+        boolean esPinOEntretenimiento = Integer.valueOf(10).equals(productoCatalogo.getIdCatTipoServicio())
+                || Integer.valueOf(11).equals(productoCatalogo.getIdCatTipoServicio());
+
+        String telefonoEntrada = request.getTelefono() != null ? request.getTelefono().trim() : "";
+        String referenciaEntrada = request.getReferencia() != null ? request.getReferencia().trim() : "";
+        String telefono;
+        String referencia;
+        String telefonoPayload;
+        String referenciaPayload;
+        BigDecimal montoPagoPayload;
+
+        if (esTipoFront1) {
+            // Segun especificacion PuntoRed:
+            // - idCatTipoServicio 10 / 11 (Prepago / Entretenimiento / Gift Card): telefono fijo "#1111111111"
+            // - Resto de tipoFront 1 (Recargas): telefono de 10 digitos obligatorio; no se envia referencia ni montoPago
+            if (esPinOEntretenimiento) {
+                telefonoPayload = "#1111111111";
+                telefono = !telefonoEntrada.isEmpty() ? telefonoEntrada : "#1111111111";
+            } else {
+                String soloDigitos = telefonoEntrada.startsWith("#") ? telefonoEntrada.substring(1) : telefonoEntrada;
+                if (!soloDigitos.matches("^\\d{10}$")) {
+                    throw new ReglaNegocioException(CatalogoCodigoError.DATOS_ENTRADA_INVALIDOS,
+                            "El telefono de 10 digitos es obligatorio para recargas telefonicas (tipoFront 1)");
+                }
+                telefonoPayload = soloDigitos;
+                telefono = soloDigitos;
+            }
+            referenciaPayload = null;
+            montoPagoPayload = null;
+            referencia = !referenciaEntrada.isEmpty() ? referenciaEntrada : telefonoPayload;
+        } else {
+            // Segun especificacion PuntoRed:
+            // - tipoFront 2 (Pago de servicios): referencia y montoPago son obligatorios; telefono fijo "1111111111"
+            if (referenciaEntrada.isEmpty()) {
+                throw new ReglaNegocioException(CatalogoCodigoError.DATOS_ENTRADA_INVALIDOS,
+                        "La referencia es obligatoria para el pago de servicios (tipoFront 2)");
+            }
+            telefonoPayload = "1111111111";
+            telefono = !telefonoEntrada.isEmpty() ? telefonoEntrada : "1111111111";
+            referenciaPayload = referenciaEntrada;
+            referencia = referenciaEntrada;
+            montoPagoPayload = montoPago;
+        }
 
         SendTxPayloadDto payload = SendTxPayloadDto.builder()
                 .idProducto(request.getIdProducto())
                 .idServicio(request.getIdServicio())
-                .telefono(telefono)
-                .referencia(referencia)
+                .telefono(telefonoPayload)
+                .referencia(referenciaPayload)
                 .horaLocal(horaLocal)
-                .montoPago(montoPago)
+                .montoPago(montoPagoPayload)
                 .upc(upc)
                 .unidad(unidadNegocio)
                 .build();
@@ -368,12 +410,16 @@ public class PagoServicioServiceImpl implements PagoServicioService {
     }
 
     /**
-     * Producto de monto fijo (precio &gt; 0 en el catálogo): el monto debe ser exactamente ese precio.
-     * Producto de monto abierto: debe estar dentro del rango configurado.
+     * De acuerdo con la especificación técnica de PuntoRed (getProductList):
+     * - Si tipoFront == 1: el campo "precio" representa el precio final fijo a cobrar (no se permite manipular).
+     * - Si tipoFront == 2: el campo "precio" representa la comisión de la transacción y el monto del recibo es abierto
+     *   dentro del rango permitido [montoMinimoAbierto, montoMaximoAbierto].
      */
     private void validarMontoContraCatalogo(ProductItemDto producto, BigDecimal monto) {
         BigDecimal precio = producto.getPrecio();
-        if (precio != null && precio.signum() > 0) {
+        boolean esPrecioFijo = (producto.getTipoFront() == null || Integer.valueOf(1).equals(producto.getTipoFront()))
+                && precio != null && precio.signum() > 0;
+        if (esPrecioFijo) {
             if (monto.compareTo(precio.setScale(2, RoundingMode.HALF_UP)) != 0) {
                 throw new ReglaNegocioException(CatalogoCodigoError.MONTO_NO_PERMITIDO,
                         "El producto solicitado solo admite el monto de " + precio.setScale(2, RoundingMode.HALF_UP));

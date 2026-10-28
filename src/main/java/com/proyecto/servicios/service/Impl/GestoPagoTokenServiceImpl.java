@@ -12,15 +12,20 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Service
 @Slf4j
 public class GestoPagoTokenServiceImpl implements GestoPagoTokenService {
 
+    private static final long HORAS_VIGENCIA_SEGURA = 20;
+
     private final GestoPagoAuthClient gestoPagoAuthClient;
     private final GestoPagoTokenRepository tokenRepository;
     private final GestoPagoTokenMapper tokenMapper;
+    private final AtomicReference<String> tokenEnMemoria = new AtomicReference<>();
 
     @Value("${gestopago.auth.id-distribuidor}")
     private Integer idDistribuidor;
@@ -39,8 +44,32 @@ public class GestoPagoTokenServiceImpl implements GestoPagoTokenService {
         this.tokenMapper = tokenMapper;
     }
 
-    @Override
+    /**
+     * De acuerdo con la especificación técnica de PuntoRed, cada JWT tiene una vigencia de 24 horas
+     * y no se debe solicitar un nuevo token en cada petición si ya existe uno vigente.
+     */
     @Scheduled(fixedRateString = "${gestopago.auth.refresh-rate-ms:3600000}", initialDelay = 0)
+    public void verificarTokenProgramado() {
+        String dispLimpio = codigoDispositivo != null ? codigoDispositivo.trim() : "";
+        try {
+            Optional<GestoPagoToken> tokenOpt = obtenerTokenActivo(idDistribuidor, dispLimpio);
+            if (tokenOpt.isPresent()) {
+                GestoPagoToken actual = tokenOpt.get();
+                boolean tieneToken = actual.getToken() != null && !actual.getToken().trim().isEmpty();
+                boolean vigente = actual.getFechaActualizacion() != null
+                        && actual.getFechaActualizacion().isAfter(LocalDateTime.now().minusHours(HORAS_VIGENCIA_SEGURA));
+                if (tieneToken && Boolean.TRUE.equals(actual.getActivo()) && vigente) {
+                    tokenEnMemoria.set(actual.getToken().trim());
+                    return;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("No se pudo verificar el token en BD durante la revision programada ({})", e.getClass().getSimpleName());
+        }
+        renovarToken();
+    }
+
+    @Override
     public void renovarToken() {
         String dispLimpio = codigoDispositivo != null ? codigoDispositivo.trim() : "";
         String passLimpio = password != null ? password.trim() : "";
@@ -56,17 +85,30 @@ public class GestoPagoTokenServiceImpl implements GestoPagoTokenService {
                 return;
             }
 
-            response.setToken(response.getToken().trim());
+            String tokenLimpio = response.getToken().trim();
+            response.setToken(tokenLimpio);
+            tokenEnMemoria.set(tokenLimpio);
 
             GestoPagoToken tokenEntity = tokenRepository
                     .findByIdDistribuidorAndCodigoDispositivo(idDistribuidor, dispLimpio)
                     .map(existing -> {
-                        tokenMapper.updateEntity(response, existing);
+                        if (tokenMapper != null) {
+                            tokenMapper.updateEntity(response, existing);
+                        }
+                        existing.setToken(tokenLimpio);
+                        existing.setTokenType(response.getTokenType());
+                        existing.setExpiresIn(response.getExpiresIn());
                         existing.setActivo(true);
                         return existing;
                     })
                     .orElseGet(() -> {
-                        GestoPagoToken nuevo = tokenMapper.toEntity(response);
+                        GestoPagoToken nuevo = tokenMapper != null ? tokenMapper.toEntity(response) : new GestoPagoToken();
+                        if (nuevo == null) {
+                            nuevo = new GestoPagoToken();
+                        }
+                        nuevo.setToken(tokenLimpio);
+                        nuevo.setTokenType(response.getTokenType());
+                        nuevo.setExpiresIn(response.getExpiresIn());
                         nuevo.setIdDistribuidor(idDistribuidor);
                         nuevo.setCodigoDispositivo(dispLimpio);
                         nuevo.setActivo(true);
@@ -95,16 +137,22 @@ public class GestoPagoTokenServiceImpl implements GestoPagoTokenService {
                 && tokenOpt.get().getToken() != null
                 && !tokenOpt.get().getToken().trim().isEmpty()
                 && Boolean.TRUE.equals(tokenOpt.get().getActivo())) {
-            return tokenOpt.get().getToken().trim();
+            String tokenBd = tokenOpt.get().getToken().trim();
+            tokenEnMemoria.set(tokenBd);
+            return tokenBd;
         }
 
         log.info("No se encontro un token activo en BD. Renovando token para distribuidor={}...", idDistribuidor);
         renovarToken();
 
-        return obtenerTokenActivo(idDistribuidor, dispLimpio)
+        Optional<String> recienGuardado = obtenerTokenActivo(idDistribuidor, dispLimpio)
                 .map(GestoPagoToken::getToken)
                 .filter(t -> !t.trim().isEmpty())
-                .map(String::trim)
-                .orElse(null);
+                .map(String::trim);
+        if (recienGuardado.isPresent()) {
+            return recienGuardado.get();
+        }
+        String enMemoria = tokenEnMemoria.get();
+        return (enMemoria != null && !enMemoria.isBlank()) ? enMemoria.trim() : null;
     }
 }

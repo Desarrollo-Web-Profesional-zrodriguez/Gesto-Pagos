@@ -54,20 +54,18 @@ public class PagoServicioRequest {
     @JsonDeserialize(using = StrictTwoDecimalNumberDeserializer.class)
     @JsonProperty("monto")
     @JsonAlias({"monto", "montoPago"})
-    @Schema(description = "Monto a pagar en numero directo con dos decimales sin comillas (ejemplo: 150.00)", example = "150.00")
+    @Schema(description = "Monto a pagar en numero directo con dos decimales sin comillas (ejemplo: 601.99)", example = "601.99")
     private BigDecimal monto;
 
-    @NotBlank(message = "El telefono es obligatorio")
-    @Pattern(regexp = "^\\d{10}$", message = "El telefono solo debe contener numeros y exactamente 10 digitos")
+    @Pattern(regexp = "^$|^#?\\d{10}$", message = "El telefono debe contener 10 digitos numericos (o # seguido de 10 digitos para pines/entretenimiento)")
     @JsonProperty("telefono")
-    @Schema(description = "Telefono de 10 digitos ingresado por el cliente", example = "5512345678")
+    @Schema(description = "Telefono de 10 digitos ingresado por el cliente (para tipoFront=2 GestoPago utiliza 1111111111; para idCatTipoServicio 10/11 utiliza #1111111111)", example = "1111111111")
     private String telefono;
 
-    @NotBlank(message = "La referencia es obligatoria")
-    @Size(min = 1, max = 100, message = "La referencia debe tener entre 1 y 100 caracteres segun la documentacion")
-    @Pattern(regexp = "^[a-zA-Z0-9]+$", message = "La referencia solo debe contener caracteres alfanumericos sin espacios ni simbolos especiales")
+    @Size(max = 100, message = "La referencia debe tener maximo 100 caracteres segun la documentacion")
+    @Pattern(regexp = "^[a-zA-Z0-9]*$", message = "La referencia solo debe contener caracteres alfanumericos sin espacios ni simbolos especiales")
     @JsonProperty("referencia")
-    @Schema(description = "Referencia alfanumerica del recibo o servicio a pagar (entre 1 y 100 caracteres)", example = "25720381")
+    @Schema(description = "Referencia alfanumerica del recibo o servicio a pagar (obligatoria para pago de servicios tipoFront=2; no aplica para recargas/pines tipoFront=1)", example = "25720381")
     private String referencia;
 
     @NotBlank(message = "El factor de autenticacion (2FA) es obligatorio")
