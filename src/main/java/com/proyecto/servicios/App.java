@@ -13,8 +13,6 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 
-
-
 @SpringBootApplication
 @EnableScheduling
 @EnableFeignClients
@@ -25,25 +23,24 @@ public class App implements CommandLineRunner {
     @Autowired
     private ApplicationContext context;
 
-
     public static void main(String[] args) {
         SpringApplication.run(App.class, args);
     }
 
     @Override
     public void run(String... args) {
-        //	displayInfo(context.getBean(BuildProperties.class));
+        displayInfo(context.getBean(BuildProperties.class));
     }
 
     private static void displayInfo(BuildProperties buildProperties) {
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.systemDefault());
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+                .withZone(ZoneId.systemDefault());
         String out = formatter.format(buildProperties.getTime());
         log.info("Nombre artefacto: " + buildProperties.getName() + "\n"
                 + "Versión: " + buildProperties.getVersion() + "\n"
                 + "Fecha Compilación: " + out + "\n"
                 + "Artefacto: " + buildProperties.getArtifact() + "\n"
                 + "Grupo: " + buildProperties.getGroup());
-
 
     }
 }
