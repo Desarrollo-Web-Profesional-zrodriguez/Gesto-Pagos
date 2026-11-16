@@ -43,49 +43,16 @@ public class AuthServiceImpl implements AuthService {
             throw new AutenticacionException("El usuario se encuentra inactivo");
         }
 
-        boolean autenticado = false;
-
-        // 1. Verificación por Contraseña cifrada
-        if (request.getPassword() != null && !request.getPassword().trim().isEmpty()) {
-            if (PasswordEncryptionUtil.verificarPassword(request.getPassword(), usuario.getPasswordHash())) {
-                autenticado = true;
-                log.info("[Auth]: Autenticacion exitosa por contrasena para: {}", usuario.getUsername());
-            } else {
-                log.warn("[Auth]: Contrasena distinta a la registrada para: {}", usuario.getUsername());
-                throw new AutenticacionException("La contrasena es distinta a la registrada");
-            }
-        }
-
-        // 2. Verificación por Biometría Facial (MediaPipe Embeddings)
-        if (!autenticado && request.getBiometricoFacialEmbedding() != null && !request.getBiometricoFacialEmbedding().trim().isEmpty()) {
-            if (usuario.getBiometricoFacialEmbedding() == null) {
-                throw new AutenticacionException("El usuario no tiene registrado perfil biometrico facial");
-            }
-
-            boolean coincidencia = BiometriaFacialUtil.coincideEmbedding(
-                    usuario.getBiometricoFacialEmbedding(), 
-                    request.getBiometricoFacialEmbedding()
-            );
-
-            if (coincidencia) {
-                autenticado = true;
-                log.info("[Auth]: Autenticacion exitosa por biometria facial MediaPipe para: {}", usuario.getUsername());
-            } else {
-                log.warn("[Auth]: Fallo la verificacion de embedding biometrico facial para: {}", usuario.getUsername());
-                throw new AutenticacionException("El vector biometrico facial es distinto al registrado");
-            }
+        boolean autenticado = verificarPassword(request.getPassword(), usuario);
+        if (!autenticado) {
+            autenticado = verificarBiometriaFacial(request.getBiometricoFacialEmbedding(), usuario);
         }
 
         if (!autenticado) {
             throw new AutenticacionException("Debe proporcionar contrasena o vector biometrico facial");
         }
 
-        // Inactivar sesiones previas del usuario
-        List<SesionLogin> sesionesPrevias = sesionLoginRepository.findByUsuarioIdUsuarioAndActivaTrue(usuario.getIdUsuario());
-        for (SesionLogin sesionPrevia : sesionesPrevias) {
-            sesionPrevia.setActiva(false);
-        }
-        sesionLoginRepository.saveAll(sesionesPrevias);
+        inactivarSesionesPrevias(usuario.getIdUsuario());
 
         // Crear nueva sesión con timeout de 5 minutos de inactividad
         LocalDateTime ahora = LocalDateTime.now();
@@ -102,10 +69,6 @@ public class AuthServiceImpl implements AuthService {
 
         sesionLoginRepository.save(nuevaSesion);
 
-        String nombreCliente = (usuario.getCliente() != null) 
-                ? usuario.getCliente().getNombre() + " " + usuario.getCliente().getApellidoPaterno() 
-                : usuario.getUsername();
-
         return LoginResponse.builder()
                 .tokenSesion(tokenSesion)
                 .activa(true)
@@ -116,9 +79,54 @@ public class AuthServiceImpl implements AuthService {
                 .idUsuario(usuario.getIdUsuario())
                 .idCliente(usuario.getCliente() != null ? usuario.getCliente().getIdCliente() : null)
                 .username(usuario.getUsername())
-                .nombreCliente(nombreCliente)
+                .nombreCliente(resolverNombreCliente(usuario))
                 .mensaje("Inicio de sesion exitoso. Inactividad maxima permitida: 5 minutos.")
                 .build();
+    }
+
+    private boolean verificarPassword(String password, UsuarioLogin usuario) {
+        if (password == null || password.trim().isEmpty()) {
+            return false;
+        }
+        if (PasswordEncryptionUtil.verificarPassword(password, usuario.getPasswordHash())) {
+            log.info("[Auth]: Autenticacion exitosa por contrasena para: {}", usuario.getUsername());
+            return true;
+        }
+        log.warn("[Auth]: Contrasena distinta a la registrada para: {}", usuario.getUsername());
+        throw new AutenticacionException("La contrasena es distinta a la registrada");
+    }
+
+    private boolean verificarBiometriaFacial(String embedding, UsuarioLogin usuario) {
+        if (embedding == null || embedding.trim().isEmpty()) {
+            return false;
+        }
+        if (usuario.getBiometricoFacialEmbedding() == null) {
+            throw new AutenticacionException("El usuario no tiene registrado perfil biometrico facial");
+        }
+        boolean coincidencia = BiometriaFacialUtil.coincideEmbedding(
+                usuario.getBiometricoFacialEmbedding(), 
+                embedding
+        );
+        if (coincidencia) {
+            log.info("[Auth]: Autenticacion exitosa por biometria facial MediaPipe para: {}", usuario.getUsername());
+            return true;
+        }
+        log.warn("[Auth]: Fallo la verificacion de embedding biometrico facial para: {}", usuario.getUsername());
+        throw new AutenticacionException("El vector biometrico facial es distinto al registrado");
+    }
+
+    private void inactivarSesionesPrevias(Long idUsuario) {
+        List<SesionLogin> sesionesPrevias = sesionLoginRepository.findByUsuarioIdUsuarioAndActivaTrue(idUsuario);
+        for (SesionLogin sesionPrevia : sesionesPrevias) {
+            sesionPrevia.setActiva(false);
+        }
+        sesionLoginRepository.saveAll(sesionesPrevias);
+    }
+
+    private String resolverNombreCliente(UsuarioLogin usuario) {
+        return (usuario.getCliente() != null) 
+                ? usuario.getCliente().getNombre() + " " + usuario.getCliente().getApellidoPaterno() 
+                : usuario.getUsername();
     }
 
     @Override

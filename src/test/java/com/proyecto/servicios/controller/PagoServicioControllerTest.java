@@ -30,6 +30,7 @@ import com.proyecto.servicios.exception.RecursoNoEncontradoException;
 import com.proyecto.servicios.exception.ReglaNegocioException;
 import com.proyecto.servicios.exception.SolicitudDuplicadaException;
 import com.proyecto.servicios.model.gestopago.transaccion.PagoEstatusResponse;
+import com.proyecto.servicios.model.gestopago.transaccion.ValidarReferenciaResponse;
 import com.proyecto.servicios.service.ComprobanteEmailService;
 import com.proyecto.servicios.service.PagoServicioService;
 
@@ -156,5 +157,41 @@ class PagoServicioControllerTest {
                 .upc("ABCDE12345").estatus("EXITOSA").definitivo(true).monto(new BigDecimal("150.00")).build());
         mockMvc.perform(get("/pagos/estatus/ABCDE12345")).andExpect(status().isOk())
                 .andExpect(jsonPath("$.estatus").value("EXITOSA"));
+    }
+
+    @Test
+    @DisplayName("Validar referencia: valida => 200; rechazada => 400 con codigo 55")
+    void validarReferencia() throws Exception {
+        String body = """
+                {"numCuenta":"8324433882000000","idServicio":76,"idProducto":205,"referencia":"25720381","monto":150.00}
+                """;
+        when(pagoServicioService.validarReferencia(any())).thenReturn(ValidarReferenciaResponse.builder()
+                .valida(true)
+                .mensaje("Referencia validada correctamente para CFE")
+                .idServicio(76L)
+                .servicio("CFE")
+                .idProducto(205L)
+                .producto("Pago CFE")
+                .referenciaNormalizada("25720381")
+                .saldoSuficiente(true)
+                .build());
+
+        mockMvc.perform(post("/pagos/validar-referencia")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.valida").value(true))
+                .andExpect(jsonPath("$.servicio").value("CFE"));
+
+        when(pagoServicioService.validarReferencia(any()))
+                .thenThrow(new ReglaNegocioException(CatalogoCodigoError.GESTOPAGO_55_REFERENCIA_INVALIDA,
+                        "La referencia ingresada no cumple con el formato valido"));
+
+        mockMvc.perform(post("/pagos/validar-referencia")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.codigo").value(55))
+                .andExpect(jsonPath("$.codigoCatalogo").value("GESTOPAGO_55_REFERENCIA_INVALIDA"));
     }
 }

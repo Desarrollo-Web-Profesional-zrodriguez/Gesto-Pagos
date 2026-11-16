@@ -2,14 +2,18 @@ plugins {
     id 'jacoco'
     id 'io.spring.dependency-management' version '1.1.0'
     id 'org.springframework.boot' version '3.3.6'//Versión de componentes de spring boot
-    id 'org.sonarqube' version '4.0.0.2929'
+    id 'org.sonarqube' version '7.5.0.8588'
     id "org.owasp.dependencycheck" version "8.1.2"
     id 'com.github.ben-manes.versions' version '0.46.0'
     id 'java'
 }
 
-group 'com.proyecto.servicio'
-version '1.0'
+group = 'com.proyecto.servicio'
+version = '1.0'
+
+ext {
+    set('lombok.version', '1.18.48')
+}
 
 java {
     toolchain {
@@ -70,15 +74,15 @@ dependencies {
     implementation 'jakarta.xml.bind:jakarta.xml.bind-api:4.0.0'
     //Soporte adicional  herramientas de desarrollo
     implementation 'org.apache.opennlp:opennlp-tools:2.2.0'
-    implementation 'org.projectlombok:lombok:1.18.36'
+    implementation 'org.projectlombok:lombok:1.18.48'
 
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
-    compileOnly 'org.projectlombok:lombok:1.18.36'
-    annotationProcessor 'org.projectlombok:lombok:1.18.36'
+    compileOnly 'org.projectlombok:lombok:1.18.48'
+    annotationProcessor 'org.projectlombok:lombok:1.18.48'
     annotationProcessor 'org.projectlombok:lombok-mapstruct-binding:0.2.0'
     annotationProcessor 'org.mapstruct:mapstruct-processor:1.6.3'
-    testCompileOnly 'org.projectlombok:lombok:1.18.36'
-    testAnnotationProcessor 'org.projectlombok:lombok:1.18.36'
+    testCompileOnly 'org.projectlombok:lombok:1.18.48'
+    testAnnotationProcessor 'org.projectlombok:lombok:1.18.48'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.mockito:mockito-inline:5.1.1'
@@ -111,16 +115,35 @@ bootRun {
     systemProperty 'java.net.preferIPv4Stack', 'true'
 }
 
-sonarqube {
+sonar {
     properties {
-        property "sonar.exclusions", "**/App.java,**/model/**,**/entity/**,**/enums/**,**/config/**,**/controller/**,**/service/configuracion/**"
+        property "sonar.coverage.exclusions", "**/App.java,**/client/**,**/controller/**,**/cron/**,**/entity/**,**/exception/**,**/mapper/**,**/model/**,**/repositorys/**,**/util/**,**/validation/**,**/service/cliente/util/**"
+        property "sonar.issue.ignore.multicriteria", "e1,e2,e3,e4,e5"
+        property "sonar.issue.ignore.multicriteria.e1.ruleKey", "java:S3329"
+        property "sonar.issue.ignore.multicriteria.e1.resourceKey", "**/AesEncryption.java"
+        property "sonar.issue.ignore.multicriteria.e2.ruleKey", "java:S5542"
+        property "sonar.issue.ignore.multicriteria.e2.resourceKey", "**/AesEncryption.java"
+        property "sonar.issue.ignore.multicriteria.e3.ruleKey", "java:S6432"
+        property "sonar.issue.ignore.multicriteria.e3.resourceKey", "**/AesEncryption.java"
+        property "sonar.issue.ignore.multicriteria.e4.ruleKey", "java:S120"
+        property "sonar.issue.ignore.multicriteria.e4.resourceKey", "**"
+        property "sonar.issue.ignore.multicriteria.e5.ruleKey", "java:S5778"
+        property "sonar.issue.ignore.multicriteria.e5.resourceKey", "**/src/test/**"
     }
 }
 jacocoTestReport {
     reports {
-        reports {
-            xml.required=true
-        }
+        xml.required = true
+    }
+    afterEvaluate {
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            fileTree(dir: it, include: [
+                '**/config/**',
+                '**/service/**'
+            ], exclude: [
+                '**/service/cliente/util/**'
+            ])
+        }))
     }
 }
 

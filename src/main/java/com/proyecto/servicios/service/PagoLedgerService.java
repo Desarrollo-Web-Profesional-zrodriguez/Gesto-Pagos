@@ -30,7 +30,7 @@ import lombok.extern.slf4j.Slf4j;
  * <p>Estrategia de dinero (patrón de dos fases, "reservar -> confirmar | liberar"):
  * <ol>
  *   <li>{@link #reservar}: bajo bloqueo pesimista del saldo, valida duplicados y saldo, retiene el monto
- *       en {@code saldoDisponible} e inserta la transacción en PROCESANDO — todo en un solo commit.</li>
+ *       en {@code saldoDisponible} e inserta la transacción en PROCESANDO — de forma atomica en un solo commit.</li>
  *   <li>La llamada HTTP al proveedor ocurre FUERA de cualquier transacción (no se retienen conexiones ni locks).</li>
  *   <li>{@link #confirmarExito} descuenta {@code saldoContable}; {@link #liberarRetencion} devuelve el disponible;
  *       {@link #marcarPendiente} deja la retención intacta cuando el resultado es desconocido.</li>
@@ -208,8 +208,7 @@ public class PagoLedgerService {
         if (xml == null) {
             return;
         }
-        String idTx = xml.getIdTx() != null ? xml.getIdTx()
-                : (xml.getMensaje() != null ? xml.getMensaje().getIdTx() : null);
+        String idTx = resolverIdTx(xml);
         tx.setIdTxGestoPago(limitar(idTx, 50));
         tx.setNumAutorizacion(limitar(xml.getNumAutorizacion(), 60));
         tx.setComision(parsearDecimal(xml.getComision()));
@@ -217,6 +216,16 @@ public class PagoLedgerService {
             tx.setPin(limitar(xml.getMensaje().getPin(), 250));
             tx.setLegend(xml.getMensaje().getLegend());
         }
+    }
+
+    private String resolverIdTx(SendTxXmlResponse xml) {
+        if (xml.getIdTx() != null) {
+            return xml.getIdTx();
+        }
+        if (xml.getMensaje() != null) {
+            return xml.getMensaje().getIdTx();
+        }
+        return null;
     }
 
     private BigDecimal parsearDecimal(String valor) {

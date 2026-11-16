@@ -18,6 +18,8 @@ import com.proyecto.servicios.model.cliente.CuentaConsultaRequest;
 import com.proyecto.servicios.model.gestopago.transaccion.PagoEstatusResponse;
 import com.proyecto.servicios.model.gestopago.transaccion.PagoServicioRequest;
 import com.proyecto.servicios.model.gestopago.transaccion.PagoServicioResponse;
+import com.proyecto.servicios.model.gestopago.transaccion.ValidarReferenciaRequest;
+import com.proyecto.servicios.model.gestopago.transaccion.ValidarReferenciaResponse;
 import com.proyecto.servicios.service.PagoServicioService;
 import com.proyecto.servicios.util.DatosSensibles;
 
@@ -38,6 +40,18 @@ public class PagoServicioController {
 
     private final PagoServicioService pagoServicioService;
     private final com.proyecto.servicios.service.ComprobanteEmailService comprobanteEmailService;
+
+    @PostMapping(value = "/validar-referencia", produces = MediaType.APPLICATION_JSON_VALUE, consumes = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(
+        summary = "Consultar y validar referencia o telefono antes de confirmar el pago",
+        description = "Valida existencia del servicio y producto en el catalogo, formato y reglas de referencia/telefono, cuenta activa y disponibilidad de saldo, devolviendo el resumen de la operacion."
+    )
+    public ResponseEntity<ValidarReferenciaResponse> validarReferencia(
+            @Valid @RequestBody ValidarReferenciaRequest request) {
+        log.info("[REST /pagos/validar-referencia]: Validando referencia para cuenta: {}, idServicio: {}, idProducto: {}",
+                DatosSensibles.enmascararCuenta(request.getNumCuenta()), request.getIdServicio(), request.getIdProducto());
+        return ResponseEntity.ok(pagoServicioService.validarReferencia(request));
+    }
 
     @PostMapping(produces = MediaType.APPLICATION_JSON_VALUE, consumes = MediaType.APPLICATION_JSON_VALUE)
     @Operation(

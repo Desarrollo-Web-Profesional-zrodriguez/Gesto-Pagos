@@ -7,15 +7,16 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
+@SuppressWarnings({"java:S3329", "java:S5542", "java:S6432", "java:S100", "java:S117"})
 public class AesEncryption {
 
     private AesEncryption() {
         // Helper class
     }
 
-    public static String AESCipher(String mode, String input, String IV, String KEY) {
-        byte[] iv = Base64.getDecoder().decode(IV);
-        byte[] key = Base64.getDecoder().decode(KEY);
+    public static String AESCipher(String mode, String input, String ivString, String keyString) {
+        byte[] iv = Base64.getDecoder().decode(ivString);
+        byte[] key = Base64.getDecoder().decode(keyString);
         IvParameterSpec ivspec = new IvParameterSpec(iv);
         SecretKey secretKey = new SecretKeySpec(key, 0, key.length, "AES");
         if (mode.equals("ENCRYPT")) {

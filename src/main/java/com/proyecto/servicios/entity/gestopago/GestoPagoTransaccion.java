@@ -13,6 +13,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -114,6 +115,15 @@ public class GestoPagoTransaccion {
 
     @Column(name = "fecha_actualizacion", nullable = false)
     private LocalDateTime fechaActualizacion;
+
+    @Transient
+    private String servicio;
+
+    @Transient
+    private String producto;
+
+    @Transient
+    private String urlLogo;
 
     @PrePersist
     void prePersist() {

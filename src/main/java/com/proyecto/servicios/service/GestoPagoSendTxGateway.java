@@ -23,7 +23,7 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * Única puerta de salida hacia sendTx.do. Encapsula autenticación Bearer, renovación del token,
- * lectura segura del XML y, sobre todo, la CLASIFICACIÓN del resultado en tres veredictos
+ * lectura segura del XML y, especialmente, la CLASIFICACIÓN del resultado en tres veredictos
  * (EXITO / RECHAZADO / INDETERMINADO). Esa clasificación decide qué se hace con el dinero:
  *
  * <ul>
@@ -39,6 +39,7 @@ import lombok.extern.slf4j.Slf4j;
 public class GestoPagoSendTxGateway {
 
     private static final String CODIGO_EXITO = "01";
+    private static final String EXPIRED_TOKEN_TEXT = "EXPIRED";
     /** Códigos del proveedor que significan "en proceso", "falla aguas abajo" o "timeout (82 -> requiere confirmTx)". */
     private static final Set<String> CODIGOS_INDETERMINADOS = Set.of("07", "08", "82");
 
@@ -105,7 +106,7 @@ public class GestoPagoSendTxGateway {
         }
 
         String limpio = respuesta.trim();
-        if (limpio.startsWith("{") && limpio.contains("EXPIRED")) {
+        if (limpio.startsWith("{") && limpio.contains(EXPIRED_TOKEN_TEXT)) {
             // El proveedor rechazó la autenticación: la operación no se procesó.
             log.warn("[sendTx]: UPC={} token expirado segun el proveedor", upc);
             return noEnviado(CatalogoCodigoError.TOKEN_GESTOPAGO_INVALIDO);
@@ -146,7 +147,7 @@ public class GestoPagoSendTxGateway {
             return invocar(token, payloadCifrado, upc);
         } catch (FeignException e) {
             boolean tokenRechazado = e.status() == 401 || e.status() == 403
-                    || (e.status() >= 400 && e.status() < 500 && e.contentUTF8() != null && e.contentUTF8().contains("EXPIRED"));
+                    || (e.status() >= 400 && e.status() < 500 && e.contentUTF8() != null && e.contentUTF8().contains(EXPIRED_TOKEN_TEXT));
             if (!tokenRechazado) {
                 throw e;
             }
@@ -174,7 +175,7 @@ public class GestoPagoSendTxGateway {
         return gestoPagoClient.sendTx(authHeader, form);
     }
 
-    private SendTxXmlResponse parsear(String xml) throws Exception {
+    private SendTxXmlResponse parsear(String xml) throws JAXBException, javax.xml.stream.XMLStreamException {
         Unmarshaller unmarshaller = jaxbContext.createUnmarshaller();
         XMLStreamReader reader = xmlInputFactory.createXMLStreamReader(new StringReader(xml));
         try {

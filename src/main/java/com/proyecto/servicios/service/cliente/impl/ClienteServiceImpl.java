@@ -55,6 +55,8 @@ public class ClienteServiceImpl implements ClienteService {
     private final UsuarioLoginRepository usuarioLoginRepository;
     private final NacionalidadRepository nacionalidadRepository;
 
+    private static final String ESTATUS_ACTIVA = "ACTIVA";
+    private static final String ESTATUS_INACTIVA = "INACTIVA";
     private static final SecureRandom RANDOM = new SecureRandom();
 
     @Override
@@ -116,7 +118,7 @@ public class ClienteServiceImpl implements ClienteService {
                 .cliente(clienteGuardado)
                 .numeroCuenta(numeroCuenta)
                 .tipoCuenta("DEBITO")
-                .estatus("ACTIVA")
+                .estatus(ESTATUS_ACTIVA)
                 .build();
         Cuenta cuentaGuardada = cuentaRepository.save(cuenta);
 
@@ -167,73 +169,22 @@ public class ClienteServiceImpl implements ClienteService {
     @Override
     @Transactional(readOnly = true)
     public List<ClienteResponse> busquedaAvanzada(ClienteBusquedaAvanzadaRequest request) {
-        if (request == null) {
+        if (request == null || !tieneCriteriosBusqueda(request)) {
             return obtenerTodos();
-        }
-        boolean tieneIdentificador = request.getIdentificador() != null && !request.getIdentificador().trim().isEmpty();
-        boolean tieneCurp = request.getCurp() != null && !request.getCurp().trim().isEmpty();
-        boolean tieneRfc = request.getRfc() != null && !request.getRfc().trim().isEmpty();
-        boolean tieneCorreo = request.getCorreoElectronico() != null && !request.getCorreoElectronico().trim().isEmpty();
-        boolean tieneCuenta = request.getNumeroCuenta() != null && !request.getNumeroCuenta().trim().isEmpty();
-        boolean tieneActivo = request.getActivo() != null;
-        boolean tieneFechas = request.getFechaInicio() != null && request.getFechaFin() != null;
-
-        if (!tieneIdentificador && !tieneCurp && !tieneRfc && !tieneCorreo && !tieneCuenta && !tieneActivo && !tieneFechas) {
-            return obtenerTodos().stream().map(resp -> {
-                resp.setIdCliente(null);
-                if (resp.getCuentas() != null) {
-                    resp.getCuentas().forEach(cta -> cta.setIdCliente(null));
-                }
-                return resp;
-            }).collect(Collectors.toList());
         }
 
         Map<Long, Cliente> clientesMap = new LinkedHashMap<>();
+        poblarCandidatosBusqueda(request, clientesMap);
 
-        if (tieneIdentificador) {
-            String idVal = request.getIdentificador().trim();
-            try {
-                Cliente c = buscarClienteEntidadPorIdentificador(idVal);
-                clientesMap.put(c.getIdCliente(), c);
-            } catch (Exception ignored) {
-            }
-            clienteRepository.findByCurpContainingIgnoreCase(idVal)
-                    .forEach(c -> clientesMap.put(c.getIdCliente(), c));
-            clienteRepository.findByRfcContainingIgnoreCase(idVal)
-                    .forEach(c -> clientesMap.put(c.getIdCliente(), c));
-            clienteRepository.findByCorreoElectronicoContainingIgnoreCase(idVal)
-                    .forEach(c -> clientesMap.put(c.getIdCliente(), c));
-            clienteRepository.buscarPorNumeroCuentaContaining(idVal)
-                    .forEach(c -> clientesMap.put(c.getIdCliente(), c));
-            clienteRepository.buscarPorNombreOCoincidencia(idVal)
-                    .forEach(c -> clientesMap.put(c.getIdCliente(), c));
-        }
-        if (tieneCurp) {
-            clienteRepository.findByCurpContainingIgnoreCase(request.getCurp().trim())
-                    .forEach(c -> clientesMap.put(c.getIdCliente(), c));
-        }
-        if (tieneRfc) {
-            clienteRepository.findByRfcContainingIgnoreCase(request.getRfc().trim())
-                    .forEach(c -> clientesMap.put(c.getIdCliente(), c));
-        }
-        if (tieneCorreo) {
-            clienteRepository.findByCorreoElectronicoContainingIgnoreCase(request.getCorreoElectronico().trim())
-                    .forEach(c -> clientesMap.put(c.getIdCliente(), c));
-        }
-        if (tieneCuenta) {
-            clienteRepository.buscarPorNumeroCuentaContaining(request.getNumeroCuenta().trim())
-                    .forEach(c -> clientesMap.put(c.getIdCliente(), c));
-        }
-        if (clientesMap.isEmpty() && (tieneActivo || tieneFechas)) {
-            clienteRepository.findAll().forEach(c -> clientesMap.put(c.getIdCliente(), c));
-        }
+        boolean tieneActivo = request.getActivo() != null;
+        boolean tieneFechas = request.getFechaInicio() != null && request.getFechaFin() != null;
 
         List<Cliente> resultado = clientesMap.values().stream()
                 .filter(c -> !tieneActivo || request.getActivo().equals(c.getActivo()))
                 .filter(c -> !tieneFechas || (c.getFechaCreacion() != null 
                         && !c.getFechaCreacion().toLocalDate().isBefore(request.getFechaInicio())
                         && !c.getFechaCreacion().toLocalDate().isAfter(request.getFechaFin())))
-                .collect(Collectors.toList());
+                .toList();
 
         if (resultado.isEmpty()) {
             throw new ClienteNoEncontradoException("No se encontro ningun cliente con los criterios proporcionados");
@@ -246,7 +197,63 @@ public class ClienteServiceImpl implements ClienteService {
                 resp.getCuentas().forEach(cta -> cta.setIdCliente(null));
             }
             return resp;
-        }).collect(Collectors.toList());
+        }).toList();
+    }
+
+    private boolean tieneCriteriosBusqueda(ClienteBusquedaAvanzadaRequest request) {
+        return (request.getIdentificador() != null && !request.getIdentificador().trim().isEmpty())
+                || (request.getCurp() != null && !request.getCurp().trim().isEmpty())
+                || (request.getRfc() != null && !request.getRfc().trim().isEmpty())
+                || (request.getCorreoElectronico() != null && !request.getCorreoElectronico().trim().isEmpty())
+                || (request.getNumeroCuenta() != null && !request.getNumeroCuenta().trim().isEmpty())
+                || request.getActivo() != null
+                || (request.getFechaInicio() != null && request.getFechaFin() != null);
+    }
+
+    private void poblarCandidatosBusqueda(ClienteBusquedaAvanzadaRequest request, Map<Long, Cliente> clientesMap) {
+        if (request.getIdentificador() != null && !request.getIdentificador().trim().isEmpty()) {
+            poblarPorIdentificador(request.getIdentificador().trim(), clientesMap);
+        }
+        if (request.getCurp() != null && !request.getCurp().trim().isEmpty()) {
+            clienteRepository.findByCurpContainingIgnoreCase(request.getCurp().trim())
+                    .forEach(c -> clientesMap.put(c.getIdCliente(), c));
+        }
+        if (request.getRfc() != null && !request.getRfc().trim().isEmpty()) {
+            clienteRepository.findByRfcContainingIgnoreCase(request.getRfc().trim())
+                    .forEach(c -> clientesMap.put(c.getIdCliente(), c));
+        }
+        if (request.getCorreoElectronico() != null && !request.getCorreoElectronico().trim().isEmpty()) {
+            clienteRepository.findByCorreoElectronicoContainingIgnoreCase(request.getCorreoElectronico().trim())
+                    .forEach(c -> clientesMap.put(c.getIdCliente(), c));
+        }
+        if (request.getNumeroCuenta() != null && !request.getNumeroCuenta().trim().isEmpty()) {
+            clienteRepository.buscarPorNumeroCuentaContaining(request.getNumeroCuenta().trim())
+                    .forEach(c -> clientesMap.put(c.getIdCliente(), c));
+        }
+        boolean tieneActivo = request.getActivo() != null;
+        boolean tieneFechas = request.getFechaInicio() != null && request.getFechaFin() != null;
+        if (clientesMap.isEmpty() && (tieneActivo || tieneFechas)) {
+            clienteRepository.findAll().forEach(c -> clientesMap.put(c.getIdCliente(), c));
+        }
+    }
+
+    private void poblarPorIdentificador(String idVal, Map<Long, Cliente> clientesMap) {
+        try {
+            Cliente c = buscarClienteEntidadPorIdentificador(idVal);
+            clientesMap.put(c.getIdCliente(), c);
+        } catch (Exception ignored) {
+            log.debug("Cliente no encontrado por identificador exacto en busqueda: {}", idVal);
+        }
+        clienteRepository.findByCurpContainingIgnoreCase(idVal)
+                .forEach(c -> clientesMap.put(c.getIdCliente(), c));
+        clienteRepository.findByRfcContainingIgnoreCase(idVal)
+                .forEach(c -> clientesMap.put(c.getIdCliente(), c));
+        clienteRepository.findByCorreoElectronicoContainingIgnoreCase(idVal)
+                .forEach(c -> clientesMap.put(c.getIdCliente(), c));
+        clienteRepository.buscarPorNumeroCuentaContaining(idVal)
+                .forEach(c -> clientesMap.put(c.getIdCliente(), c));
+        clienteRepository.buscarPorNombreOCoincidencia(idVal)
+                .forEach(c -> clientesMap.put(c.getIdCliente(), c));
     }
 
     @Override
@@ -254,7 +261,7 @@ public class ClienteServiceImpl implements ClienteService {
     public List<ClienteResponse> obtenerTodos() {
         return clienteRepository.findAll().stream()
                 .map(this::mapearAClienteResponse)
-                .collect(Collectors.toList());
+                .toList();
     }
 
     @Override
@@ -302,20 +309,23 @@ public class ClienteServiceImpl implements ClienteService {
     public List<ClienteResponse> obtenerClientesActivos() {
         return clienteRepository.findByActivoTrue().stream()
                 .map(this::mapearAClienteResponse)
-                .collect(Collectors.toList());
+                .toList();
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<ClienteResponse> obtenerPorRangoFechas(LocalDate inicio, LocalDate fin) {
-        if (inicio != null && fin != null && inicio.isAfter(fin)) {
+        if (inicio == null || fin == null) {
+            throw new ReglaNegocioException("Las fechas de inicio y fin son obligatorias");
+        }
+        if (inicio.isAfter(fin)) {
             throw new ReglaNegocioException("La fecha inicial ('" + inicio + "') no puede ser posterior a la fecha final ('" + fin + "')");
         }
         LocalDateTime desde = inicio.atStartOfDay();
         LocalDateTime hasta = fin.atTime(LocalTime.MAX);
         return clienteRepository.findByFechaCreacionBetween(desde, hasta).stream()
                 .map(this::mapearAClienteResponse)
-                .collect(Collectors.toList());
+                .toList();
     }
 
     @Override
@@ -379,10 +389,23 @@ public class ClienteServiceImpl implements ClienteService {
         Cliente cliente = clienteRepository.findById(id)
                 .orElseThrow(() -> new ClienteNoEncontradoException("Cliente no encontrado con ID: " + id));
 
+        actualizarNombresPatch(cliente, request);
+        actualizarIdentidadPatch(cliente, request);
+        actualizarContactoYEmpleoPatch(cliente, request, id);
+        actualizarEstatusYCuentasPatch(cliente, request.getActivo());
+        actualizarDomicilioPatch(cliente, request.getDomicilio());
+
+        return mapearAClienteResponse(clienteRepository.save(cliente));
+    }
+
+    private void actualizarNombresPatch(Cliente cliente, ClientePatchRequest request) {
         if (request.getNombre() != null) cliente.setNombre(request.getNombre().trim());
         if (request.getSegundoNombre() != null) cliente.setSegundoNombre(request.getSegundoNombre().trim());
         if (request.getApellidoPaterno() != null) cliente.setApellidoPaterno(request.getApellidoPaterno().trim());
         if (request.getApellidoMaterno() != null) cliente.setApellidoMaterno(request.getApellidoMaterno().trim());
+    }
+
+    private void actualizarIdentidadPatch(Cliente cliente, ClientePatchRequest request) {
         if (request.getFechaNacimiento() != null) {
             validarMayoriaDeEdad(request.getFechaNacimiento());
             cliente.setFechaNacimiento(request.getFechaNacimiento());
@@ -394,43 +417,51 @@ public class ClienteServiceImpl implements ClienteService {
             cliente.setNacionalidad(nacPatch.getGentilicio());
         }
         if (request.getEstadoCivil() != null) cliente.setEstadoCivil(request.getEstadoCivil().trim());
+    }
 
+    private void actualizarContactoYEmpleoPatch(Cliente cliente, ClientePatchRequest request, Long id) {
         if (request.getCorreoElectronico() != null && !request.getCorreoElectronico().equalsIgnoreCase(cliente.getCorreoElectronico())) {
             validarUnicidad(null, null, request.getCorreoElectronico(), id);
             cliente.setCorreoElectronico(request.getCorreoElectronico().trim().toLowerCase());
         }
-
         if (request.getTelefonoMovil() != null) cliente.setTelefonoMovil(request.getTelefonoMovil().trim());
         if (request.getTelefonoAlternativo() != null) cliente.setTelefonoAlternativo(request.getTelefonoAlternativo().trim());
         if (request.getOcupacion() != null) cliente.setOcupacion(request.getOcupacion().trim());
         if (request.getEmpresa() != null) cliente.setEmpresa(request.getEmpresa().trim());
         if (request.getIngresoMensual() != null) cliente.setIngresoMensual(request.getIngresoMensual().doubleValue());
+    }
 
-        if (request.getActivo() != null) {
-            cliente.setActivo(request.getActivo());
+    private void actualizarEstatusYCuentasPatch(Cliente cliente, Boolean activo) {
+        if (activo != null) {
+            cliente.setActivo(activo);
             if (cliente.getCuentas() != null) {
-                if (Boolean.FALSE.equals(request.getActivo())) {
-                    cliente.getCuentas().forEach(c -> c.setEstatus("INACTIVA"));
-                } else if (Boolean.TRUE.equals(request.getActivo())) {
-                    cliente.getCuentas().forEach(c -> c.setEstatus("ACTIVA"));
-                }
+                String estatus = Boolean.FALSE.equals(activo) ? ESTATUS_INACTIVA : ESTATUS_ACTIVA;
+                cliente.getCuentas().forEach(c -> c.setEstatus(estatus));
             }
         }
+    }
 
-        if (request.getDomicilio() != null && !cliente.getDomicilios().isEmpty()) {
-            Domicilio dom = cliente.getDomicilios().get(0);
-            DomicilioDto dDto = request.getDomicilio();
-            if (dDto.getCalle() != null) dom.setCalle(dDto.getCalle().trim());
-            if (dDto.getNumeroExterior() != null) dom.setNumeroExterior(dDto.getNumeroExterior().trim());
-            if (dDto.getNumeroInterior() != null) dom.setNumeroInterior(dDto.getNumeroInterior().trim());
-            if (dDto.getColonia() != null) dom.setColonia(dDto.getColonia().trim());
-            if (dDto.getMunicipio() != null) dom.setMunicipio(dDto.getMunicipio().trim());
-            if (dDto.getEstado() != null) dom.setEstado(dDto.getEstado().trim());
-            if (dDto.getCodigoPostal() != null) dom.setCodigoPostal(dDto.getCodigoPostal().trim());
-            if (dDto.getPais() != null) dom.setPais(dDto.getPais().trim());
+    private void actualizarDomicilioPatch(Cliente cliente, DomicilioDto dDto) {
+        if (dDto == null || cliente.getDomicilios().isEmpty()) {
+            return;
         }
+        Domicilio dom = cliente.getDomicilios().get(0);
+        actualizarCallesDomicilio(dom, dDto);
+        actualizarUbicacionDomicilio(dom, dDto);
+    }
 
-        return mapearAClienteResponse(clienteRepository.save(cliente));
+    private void actualizarCallesDomicilio(Domicilio dom, DomicilioDto dDto) {
+        if (dDto.getCalle() != null) dom.setCalle(dDto.getCalle().trim());
+        if (dDto.getNumeroExterior() != null) dom.setNumeroExterior(dDto.getNumeroExterior().trim());
+        if (dDto.getNumeroInterior() != null) dom.setNumeroInterior(dDto.getNumeroInterior().trim());
+        if (dDto.getColonia() != null) dom.setColonia(dDto.getColonia().trim());
+    }
+
+    private void actualizarUbicacionDomicilio(Domicilio dom, DomicilioDto dDto) {
+        if (dDto.getMunicipio() != null) dom.setMunicipio(dDto.getMunicipio().trim());
+        if (dDto.getEstado() != null) dom.setEstado(dDto.getEstado().trim());
+        if (dDto.getCodigoPostal() != null) dom.setCodigoPostal(dDto.getCodigoPostal().trim());
+        if (dDto.getPais() != null) dom.setPais(dDto.getPais().trim());
     }
 
     @Override
@@ -442,7 +473,7 @@ public class ClienteServiceImpl implements ClienteService {
         // Baja lógica
         cliente.setActivo(false);
         // Regla: Solo clientes activos pueden tener cuentas activas
-        cliente.getCuentas().forEach(cuenta -> cuenta.setEstatus("INACTIVA"));
+        cliente.getCuentas().forEach(cuenta -> cuenta.setEstatus(ESTATUS_INACTIVA));
         clienteRepository.save(cliente);
         log.info("[BajaLogica]: Cliente con ID {} y sus cuentas han sido desactivados", id);
     }
@@ -454,7 +485,7 @@ public class ClienteServiceImpl implements ClienteService {
                 .orElseThrow(() -> new ClienteNoEncontradoException("No se encontro el cliente con ID: " + id));
 
         cliente.setActivo(true);
-        cliente.getCuentas().forEach(cuenta -> cuenta.setEstatus("ACTIVA"));
+        cliente.getCuentas().forEach(cuenta -> cuenta.setEstatus(ESTATUS_ACTIVA));
         return mapearAClienteResponse(clienteRepository.save(cliente));
     }
 
@@ -464,15 +495,21 @@ public class ClienteServiceImpl implements ClienteService {
         if (request == null) {
             throw new ReglaNegocioException("Los datos para actualizar el cliente son requeridos");
         }
-        String idTarget = (request.getIdentificador() != null && !request.getIdentificador().trim().isEmpty())
-                ? request.getIdentificador().trim()
-                : (request.getCurp() != null && !request.getCurp().trim().isEmpty())
-                        ? request.getCurp().trim()
-                        : request.getRfc();
+        String idTarget = resolverIdentificadorObjetivo(request);
         if (idTarget == null || idTarget.trim().isEmpty()) {
             throw new ReglaNegocioException("Debe proporcionar un identificador, CURP o RFC en la solicitud para actualizar el cliente");
         }
         return actualizarCompletoPorIdentificador(idTarget, request);
+    }
+
+    private String resolverIdentificadorObjetivo(ClienteRegistroRequest request) {
+        if (request.getIdentificador() != null && !request.getIdentificador().trim().isEmpty()) {
+            return request.getIdentificador().trim();
+        }
+        if (request.getCurp() != null && !request.getCurp().trim().isEmpty()) {
+            return request.getCurp().trim();
+        }
+        return request.getRfc();
     }
 
     @Override
@@ -488,15 +525,21 @@ public class ClienteServiceImpl implements ClienteService {
         if (request == null) {
             throw new ReglaNegocioException("Los datos para actualizacion parcial son requeridos");
         }
-        String idTarget = (request.getIdentificador() != null && !request.getIdentificador().trim().isEmpty())
-                ? request.getIdentificador().trim()
-                : (request.getCorreoElectronico() != null && !request.getCorreoElectronico().trim().isEmpty())
-                        ? request.getCorreoElectronico().trim()
-                        : null;
+        String idTarget = resolverIdentificadorPatch(request);
         if (idTarget == null || idTarget.trim().isEmpty()) {
             throw new ReglaNegocioException("Debe proporcionar el identificador del cliente en el cuerpo de la peticion ('identificador' o 'correoElectronico')");
         }
         return actualizarParcialPorIdentificador(idTarget, request);
+    }
+
+    private String resolverIdentificadorPatch(ClientePatchRequest request) {
+        if (request.getIdentificador() != null && !request.getIdentificador().trim().isEmpty()) {
+            return request.getIdentificador().trim();
+        }
+        if (request.getCorreoElectronico() != null && !request.getCorreoElectronico().trim().isEmpty()) {
+            return request.getCorreoElectronico().trim();
+        }
+        return null;
     }
 
     @Override
@@ -627,7 +670,7 @@ public class ClienteServiceImpl implements ClienteService {
                 .estado(d.getEstado())
                 .codigoPostal(d.getCodigoPostal())
                 .pais(d.getPais())
-                .build()).collect(Collectors.toList());
+                .build()).toList();
 
         List<CuentaResponse> cuentaResponses = c.getCuentas().stream().map(cta -> {
             SaldoResponse sResp = null;
@@ -650,7 +693,7 @@ public class ClienteServiceImpl implements ClienteService {
                     .fechaApertura(cta.getFechaApertura())
                     .saldo(sResp)
                     .build();
-        }).collect(Collectors.toList());
+        }).toList();
 
         return ClienteResponse.builder()
                 .idCliente(c.getIdCliente())

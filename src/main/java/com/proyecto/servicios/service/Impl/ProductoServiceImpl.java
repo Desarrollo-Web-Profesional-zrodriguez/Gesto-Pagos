@@ -20,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import com.proyecto.servicios.util.LogoServicioResolver;
 import java.io.StringReader;
 import java.util.Collections;
@@ -120,85 +121,99 @@ public class ProductoServiceImpl implements ProductoService {
     public ProductCategorizedResponse obtenerProductosCategorizados() {
         log.info("Consultando catálogo categorizado para el cliente(sin llamar a GestoPago)...");
 
-        // Intentar consultar desde Redis (el último registro)}
-        try {
-            Object cacheData = redisTemplate.opsForValue().get(redisKey);
-            if(cacheData != null) {
-                log.info("[REDIS] Catálogo encontrado en memoria.");
-
-                // convertimos el JSON de Redis de forma segura a Map<Integer, List<ProductoItemDto>>
-                Map<Integer, List<ProductItemDto>> categorias = objectMapper.convertValue(
-                    cacheData, 
-                    new TypeReference<Map<Integer, List<ProductItemDto>>>() {}
-                );
-
-                if (!categorias.isEmpty()) {
-                    categorias.values().forEach(list -> list.forEach(p -> {
-                        if (p.getUrlLogo() == null || p.getUrlLogo().trim().isEmpty()) {
-                            p.setUrlLogo(logoServicioResolver.resolverUrlLogo(p.getServicio(), p.getProducto(), p.getIdServicio(), p.getIdProducto()));
-                        }
-                    }));
-                    // Garantizar orden de menor a mayor en las categorías (0, 1, 2...)
-                    Map<Integer, List<ProductItemDto>> categoriasOrdenadas = new TreeMap<>(categorias);
-                    int total = categoriasOrdenadas.values().stream().mapToInt(List::size).sum();
-
-                    return ProductCategorizedResponse.builder()
-                            .status(200)
-                            .message("Catálogo obtenido exitosamente")
-                            .origen("REDIS")
-                            .totalProductos(total)
-                            .categorias(categoriasOrdenadas)
-                            .build();
-                }
-            }
-        } catch (Exception e) {
-            log.warn("[REDIS ERROR] No se pudo leer de Redis: {}. Buscando respaldo en PostgreSQL...", e.getMessage());
+        ProductCategorizedResponse desdeRedis = obtenerDesdeRedis();
+        if (desdeRedis != null) {
+            return desdeRedis;
         }
 
-        // Si redis no tiene respuesta o falló, consultar en PostgreSQL
-        log.info("[POSTGRESQL] Consulta productos almacenados en base de datos...");
-        List<GestoPagoProducto> productosBD = productoRepository.findAllByOrderByTipoFrontAscIdProductoAsc();
-
-        if (productosBD != null && !productosBD.isEmpty()) {
-            // Usamos MapStruct para convertir de Entidad a DTO
-            List<ProductItemDto> dtos = productoMapper.toDtoList(productosBD);
-
-            // Normalizar categoría 0 si viene sin tipoFront y resolver urlLogo
-            dtos.forEach(p -> {
-                if (p.getTipoFront() == null) {
-                    p.setTipoFront(0);
-                }
-                if (p.getUrlLogo() == null || p.getUrlLogo().trim().isEmpty()) {
-                    p.setUrlLogo(logoServicioResolver.resolverUrlLogo(p.getServicio(), p.getProducto(), p.getIdServicio(), p.getIdProducto()));
-                }
-            });
-
-            // Agrupamos por tipoFront conservando el orden de menor a mayor
-            Map<Integer, List<ProductItemDto>> categoriasBD = dtos.stream()
-                    .collect(Collectors.groupingBy(
-                            ProductItemDto::getTipoFront,
-                            LinkedHashMap::new,
-                            Collectors.toList()
-                    ));
-
-            return ProductCategorizedResponse.builder()
-                    .status(200)
-                    .message("Catálogo obtenido exitosamente desde base de datos")
-                    .origen("POSTGRESQL")
-                    .totalProductos(productosBD.size())
-                    .categorias(categoriasBD)
-                    .build();
+        ProductCategorizedResponse desdeBD = obtenerDesdePostgres();
+        if (desdeBD != null) {
+            return desdeBD;
         }
 
         // Si ni en Redis ni en BD hay datos
         log.warn("No se encontró catálogo disponible en Redis ni en PostgreSQL.");
         return ProductCategorizedResponse.builder()
-        .status(404)
-        .message("No hay catálogo disponible en caché ni en base de datos. Espere la sincronización de las 6:00 AM")
-        .origen("NINGUNO")
-        .totalProductos(0)
-        .categorias(Collections.emptyMap())
-        .build();
+                .status(404)
+                .message("No hay catálogo disponible en caché ni en base de datos. Espere la sincronización de las 6:00 AM")
+                .origen("NINGUNO")
+                .totalProductos(0)
+                .categorias(Collections.emptyMap())
+                .build();
+    }
+
+    private ProductCategorizedResponse obtenerDesdeRedis() {
+        try {
+            Object cacheData = redisTemplate.opsForValue().get(redisKey);
+            if (cacheData == null) {
+                return null;
+            }
+            log.info("[REDIS] Catálogo encontrado en memoria.");
+            Map<Integer, List<ProductItemDto>> categorias = objectMapper.convertValue(
+                    cacheData,
+                    new TypeReference<Map<Integer, List<ProductItemDto>>>() {}
+            );
+            if (categorias == null || categorias.isEmpty()) {
+                return null;
+            }
+            categorias.values().forEach(list -> list.forEach(p -> {
+                if (p.getUrlLogo() == null || p.getUrlLogo().trim().isEmpty()) {
+                    p.setUrlLogo(logoServicioResolver.resolverUrlLogo(p.getServicio(), p.getProducto(), p.getIdServicio(), p.getIdProducto()));
+                }
+            }));
+            Map<Integer, List<ProductItemDto>> categoriasOrdenadas = new TreeMap<>(categorias);
+            int total = categoriasOrdenadas.values().stream().mapToInt(List::size).sum();
+            return ProductCategorizedResponse.builder()
+                    .status(200)
+                    .message("Catálogo obtenido exitosamente")
+                    .origen("REDIS")
+                    .totalProductos(total)
+                    .categorias(categoriasOrdenadas)
+                    .build();
+        } catch (Exception e) {
+            log.warn("[REDIS ERROR] No se pudo leer de Redis: {}. Buscando respaldo en PostgreSQL...", e.getMessage());
+            return null;
+        }
+    }
+
+    private ProductCategorizedResponse obtenerDesdePostgres() {
+        log.info("[POSTGRESQL] Consulta productos almacenados en base de datos...");
+        List<GestoPagoProducto> productosBD = productoRepository.findAllByOrderByTipoFrontAscIdProductoAsc();
+        if (productosBD == null || productosBD.isEmpty()) {
+            return null;
+        }
+        List<ProductItemDto> dtos = productoMapper.toDtoList(productosBD);
+        dtos.forEach(p -> {
+            if (p.getTipoFront() == null) {
+                p.setTipoFront(0);
+            }
+            if (p.getUrlLogo() == null || p.getUrlLogo().trim().isEmpty()) {
+                p.setUrlLogo(logoServicioResolver.resolverUrlLogo(p.getServicio(), p.getProducto(), p.getIdServicio(), p.getIdProducto()));
+            }
+        });
+        Map<Integer, List<ProductItemDto>> categoriasBD = dtos.stream()
+                .collect(Collectors.groupingBy(
+                        ProductItemDto::getTipoFront,
+                        LinkedHashMap::new,
+                        Collectors.toList()
+                ));
+        return ProductCategorizedResponse.builder()
+                .status(200)
+                .message("Catálogo obtenido exitosamente desde base de datos")
+                .origen("POSTGRESQL")
+                .totalProductos(productosBD.size())
+                .categorias(categoriasBD)
+                .build();
+    }
+
+    @Override
+    @Transactional
+    public void guardarEnBaseDatos(List<ProductItemDto> productos) {
+        log.info("[POSTGRESQL] Limpiando registros anteriores y guardando {} productos...", productos.size());
+        productoRepository.deleteAllInBatch();
+        List<GestoPagoProducto> entidades = productoMapper.toEntityList(productos);
+        productoRepository.saveAll(entidades);
+        log.info("[POSTGRESQL ÉXITO] Base de datos actualizada con {} productos de respaldos.", entidades.size());
     }
 
     private ProductListResponse consultarProductosConToken(String token) throws Exception {
