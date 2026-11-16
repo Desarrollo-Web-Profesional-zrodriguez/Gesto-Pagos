@@ -63,8 +63,16 @@ public class LogoServicioResolver {
 
     public LogoServicioResolver(String gestopagoBaseUrl) {
         this.gestopagoBaseUrl = (gestopagoBaseUrl != null && !gestopagoBaseUrl.trim().isEmpty())
-                ? gestopagoBaseUrl.replaceAll("/+$", "")
+                ? stripTrailingSlashes(gestopagoBaseUrl.trim())
                 : DEFAULT_GESTOPAGO_BASE_URL;
+    }
+
+    private static String stripTrailingSlashes(String url) {
+        int end = url.length();
+        while (end > 0 && url.charAt(end - 1) == '/') {
+            end--;
+        }
+        return url.substring(0, end);
     }
 
     /**
@@ -92,6 +100,7 @@ public class LogoServicioResolver {
     /**
      * Resuelve la URL del logo buscando coincidencias en el nombre del servicio o producto.
      */
+    @SuppressWarnings("java:S1172")
     public String resolverUrlLogo(String servicio, Long idServicio, Long idProducto) {
         if (servicio != null && !servicio.trim().isEmpty()) {
             String texto = servicio.toUpperCase().trim();

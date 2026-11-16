@@ -1,6 +1,8 @@
 package com.proyecto.servicios.service;
 
+import java.util.List;
 import com.proyecto.servicios.model.gestopago.catalogo.ProductCategorizedResponse;
+import com.proyecto.servicios.model.gestopago.catalogo.ProductItemDto;
 import com.proyecto.servicios.model.gestopago.catalogo.ProductListResponse;
 
 public interface ProductoService {
@@ -16,4 +18,9 @@ public interface ProductoService {
      * 2. Si Redis no tiene respuesta o falla, consulta el respaldo en PostgreSQL
      */
     ProductCategorizedResponse obtenerProductosCategorizados();
+
+    /**
+     * Guarda el catálogo en la base de datos de respaldo (PostgreSQL).
+     */
+    void guardarEnBaseDatos(List<ProductItemDto> productos);
 } 

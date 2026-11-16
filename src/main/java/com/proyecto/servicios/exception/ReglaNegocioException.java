@@ -34,24 +34,26 @@ public class ReglaNegocioException extends RuntimeException {
      * Construye una excepción usando directamente el código devuelto por GestoPago (ej. "06" -> codigo: 6).
      */
     public static ReglaNegocioException desdeGestoPago(String codigoGp, String textoProveedor) {
-        CatalogoCodigoError entradaCatalogo = CatalogoCodigoError.desdeCodigoGestoPago(codigoGp);
-        if ("55".equals(codigoGp != null ? codigoGp.trim() : null)) {
+        String codigoLimpio = (codigoGp != null) ? codigoGp.trim() : null;
+        CatalogoCodigoError entradaCatalogo = CatalogoCodigoError.desdeCodigoGestoPago(codigoLimpio);
+        if ("55".equals(codigoLimpio)) {
             boolean esErrorReferencia = textoProveedor != null
                     && textoProveedor.toLowerCase().contains("referencia");
-            entradaCatalogo = esErrorReferencia
-                    ? CatalogoCodigoError.GESTOPAGO_55_REFERENCIA_INVALIDA
-                    : CatalogoCodigoError.GESTOPAGO_55_ORIGEN_NO_AUTORIZADO;
-        }
-        Integer codigoNumerico = entradaCatalogo.getCodigo();
-        if (codigoGp != null) {
-            try {
-                codigoNumerico = Integer.parseInt(codigoGp.trim());
-            } catch (NumberFormatException ignored) {
+            if (esErrorReferencia) {
+                entradaCatalogo = CatalogoCodigoError.GESTOPAGO_55_REFERENCIA_INVALIDA;
+            } else {
+                entradaCatalogo = CatalogoCodigoError.GESTOPAGO_55_ORIGEN_NO_AUTORIZADO;
             }
         }
-        // El texto crudo del proveedor NO se expone al cliente (puede contener IPs, rutas o datos internos);
-        // se registra en bitácora/BD y aquí se responde con la descripción controlada del catálogo.
-        return new ReglaNegocioException(entradaCatalogo, codigoNumerico, codigoGp != null ? codigoGp.trim() : null,
+        Integer codigoNumerico = entradaCatalogo.getCodigo();
+        if (codigoLimpio != null) {
+            try {
+                codigoNumerico = Integer.parseInt(codigoLimpio);
+            } catch (NumberFormatException ignored) {
+                // Conservar el codigo del catalogo si no es un entero directo
+            }
+        }
+        return new ReglaNegocioException(entradaCatalogo, codigoNumerico, codigoLimpio,
                 entradaCatalogo.getDescripcion());
     }
 }

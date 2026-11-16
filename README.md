@@ -1,26 +1,27 @@
-# Proyecto Integrador: Onboarding de Clientes Personas Físicas
+# Plataforma de Pagos de Servicios GestoPagos (Backend + Web + Flutter)
 
-## 1. Documento Técnico Oficial
-> 📄 **Enlace al Documento Técnico:**  
-> [Documento Técnico](https://drive.google.com/file/d/1Amqv0GMp_M2kMNHbXpml_NQJIPlfUq8K/view?usp=sharing)
+## 1. Documentación Técnica
+
+- 📄 **Documento Técnico del Proyecto (Arquitectura, APIs, Seguridad y Pruebas):** [`DOCUMENTO_TECNICO.md`](DOCUMENTO_TECNICO.md)
+- 📄 **Documento Técnico Base (referencia original):** [Documento Técnico en Drive](https://drive.google.com/file/d/1Amqv0GMp_M2kMNHbXpml_NQJIPlfUq8K/view?usp=sharing)
 
 ---
 
-## 2. Instrucciones de Ejecución
+## 2. Instrucciones de Ejecución y Compilación
 
-### Comandos de Ejecución (Terminal / PowerShell)
+### A. Backend Spring Boot (Java 21)
 
 1. **Compilar el proyecto:**
    ```powershell
    ./gradlew compileJava
    ```
 
-2. **Ejecutar la aplicación Spring Boot:**
+2. **Ejecutar la aplicación Spring Boot (puerto `8080`):**
    ```powershell
    ./gradlew bootRun
    ```
 
-3. **Ejecutar pruebas unitarias:**
+3. **Ejecutar pruebas unitarias e integración:**
    ```powershell
    ./gradlew test
    ```
@@ -30,9 +31,40 @@
    ./gradlew build -x test
    ```
 
-5. **Documentación Swagger / OpenAPI:**
-   Accede a la interfaz interactiva para probar los endpoints en:  
-   👉 **`http://localhost:8080/swagger-ui/index.html`**
+5. **Documentación Swagger / OpenAPI:**  
+   `http://localhost:8080/swagger-ui/index.html`
+
+### B. Frontend Web Responsivo (`web/` — React 18 + TypeScript + Vite + Tailwind CSS)
+
+1. **Instalar dependencias y levantar entorno de desarrollo:**
+   ```powershell
+   cd web
+   npm install
+   npm run dev
+   ```
+   *(Por defecto apunta a `http://localhost:8080`, configurable desde la UI en "Configurar backend" o con `VITE_API_BASE_URL`.)*
+
+2. **Verificación de tipos y compilación de producción:**
+   ```powershell
+   cd web
+   npm run build
+   ```
+
+### C. Aplicación Móvil Flutter (`frontend/` — Dart + Material Design)
+
+1. **Analizar y ejecutar pruebas unitarias:**
+   ```powershell
+   cd frontend
+   flutter pub get
+   flutter analyze
+   flutter test
+   ```
+
+2. **Ejecutar aplicación móvil:**
+   ```powershell
+   cd frontend
+   flutter run
+   ```
 
 ---
 
@@ -49,26 +81,25 @@ El archivo del diagrama se encuentra en:
 
 | Método | Endpoint | Descripción |
 | :--- | :--- | :--- |
-| **POST** | `/clientes` | Onboarding de cliente (cliente + cuenta + saldo + usuario login). |
-| **GET** | `/clientes` | Listar todos los clientes. |
-| **GET** | `/clientes/{id}` | Consultar cliente por ID. |
-| **GET** | `/clientes/activos` | Consultar clientes activos. |
-| **GET** | `/clientes/buscar/curp/{curp}` | Buscar cliente por CURP. |
-| **GET** | `/clientes/buscar/rfc/{rfc}` | Buscar cliente por RFC. |
-| **GET** | `/clientes/buscar/correo/{correo}` | Buscar cliente por correo electrónico. |
-| **GET** | `/clientes/buscar/cuenta/{numeroCuenta}` | Buscar cliente por número de cuenta bancaria. |
-| **GET** | `/clientes/fechas?inicio=...&fin=...` | Consultar clientes en un rango de fechas. |
-| **PUT** | `/clientes/{id}` | Actualización completa (protege CURP y RFC). |
-| **PATCH**| `/clientes/{id}` | Actualización parcial (PATCH) de contacto, domicilio o empleo. |
-| **DELETE**| `/clientes/{id}` | Baja lógica del cliente (desactiva cuentas asociadas). |
-| **PATCH**| `/clientes/{id}/reactivar` | Reactivación lógica del cliente y sus cuentas. |
-| **GET** | `/cuentas/{numeroCuenta}` | Consultar cuenta por número único. |
-| **GET** | `/cuentas/activas` | Consultar todas las cuentas bancarias activas. |
-| **GET** | `/catalogos/nacionalidades` | Consultar catálogo de nacionalidades desde la BD. |
-| **GET** | `/catalogos/nacionalidades/{id}` | Consultar nacionalidad específica por ID. |
-| **POST** | `/auth/login` | Iniciar sesión (password cifrado o biometría MediaPipe). |
-| **GET** | `/auth/validar-sesion` | Validar sesión activa (contador de 5 min). |
+| **POST** | `/auth/login` | Iniciar sesión (contraseña cifrada o biometría MediaPipe). |
+| **GET** | `/auth/validar-sesion` | Validar y renovar sesión activa (timeout de 5 min por inactividad). |
 | **POST** | `/auth/logout` | Cierre voluntario de sesión. |
+| **GET** | `/productos` | Catálogo dinámico categorizado de productos y servicios GestoPago con logotipos. |
+| **POST** | `/pagos/validar-referencia` | Validación previa de referencia/teléfono, producto, monto y suficiencia de saldo antes del pago. |
+| **POST** | `/pagos` | Procesar pago con `Idempotency-Key`, 2FA, cifrado AES-256-CBC y reserva de saldo en 2 fases. |
+| **GET** | `/pagos/estatus/{upc}` | Consultar estatus en vivo de una transacción por UPC (10 caracteres). |
+| **POST** | `/pagos/historial` | Consultar historial de pagos de la cuenta autenticada con detalle de servicio y logotipo. |
+| **POST** | `/pagos/enviar-comprobante` | Enviar o reenviar comprobante digital por correo electrónico (Brevo). |
+| **POST** | `/clientes` | Onboarding de cliente (cliente + domicilio + cuenta + saldo + usuario login). |
+| **POST** | `/clientes/consultar` | Consultar perfil y cuentas por identificador (CURP, RFC, correo o número de cuenta). |
+| **POST** | `/clientes/buscar` | Búsqueda avanzada multicriterio de clientes. |
+| **PUT** | `/clientes` | Actualización completa de cliente. |
+| **PATCH** | `/clientes` | Actualización parcial (incluye reactivación o baja lógica con `activo`). |
+| **GET** | `/cuentas/{numeroCuenta}` | Consultar cuenta bancaria por número único de 16 dígitos. |
+| **GET** | `/cuentas/activas` | Consultar todas las cuentas bancarias activas. |
+| **POST** | `/cuentas/consultar-saldo` | Consultar saldo disponible y contable actualizado de la cuenta. |
+| **GET** | `/catalogos/nacionalidades` | Consultar catálogo de nacionalidades desde la BD. |
+| **POST** | `/catalogos/nacionalidades/buscar` | Buscar nacionalidad por código ISO, país o gentilicio. |
 
 ---
 

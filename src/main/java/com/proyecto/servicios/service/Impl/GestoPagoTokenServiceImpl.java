@@ -89,31 +89,7 @@ public class GestoPagoTokenServiceImpl implements GestoPagoTokenService {
             response.setToken(tokenLimpio);
             tokenEnMemoria.set(tokenLimpio);
 
-            GestoPagoToken tokenEntity = tokenRepository
-                    .findByIdDistribuidorAndCodigoDispositivo(idDistribuidor, dispLimpio)
-                    .map(existing -> {
-                        if (tokenMapper != null) {
-                            tokenMapper.updateEntity(response, existing);
-                        }
-                        existing.setToken(tokenLimpio);
-                        existing.setTokenType(response.getTokenType());
-                        existing.setExpiresIn(response.getExpiresIn());
-                        existing.setActivo(true);
-                        return existing;
-                    })
-                    .orElseGet(() -> {
-                        GestoPagoToken nuevo = tokenMapper != null ? tokenMapper.toEntity(response) : new GestoPagoToken();
-                        if (nuevo == null) {
-                            nuevo = new GestoPagoToken();
-                        }
-                        nuevo.setToken(tokenLimpio);
-                        nuevo.setTokenType(response.getTokenType());
-                        nuevo.setExpiresIn(response.getExpiresIn());
-                        nuevo.setIdDistribuidor(idDistribuidor);
-                        nuevo.setCodigoDispositivo(dispLimpio);
-                        nuevo.setActivo(true);
-                        return nuevo;
-                    });
+            GestoPagoToken tokenEntity = resolverTokenEntity(response, tokenLimpio, dispLimpio);
 
             tokenRepository.save(tokenEntity);
             log.info("Token GestoPago renovado correctamente");
@@ -121,6 +97,34 @@ public class GestoPagoTokenServiceImpl implements GestoPagoTokenService {
         } catch (Exception e) {
             log.error("Error al renovar token GestoPago ({})", e.getClass().getSimpleName());
         }
+    }
+
+    private GestoPagoToken resolverTokenEntity(GestoPagoAuthResponse response, String tokenLimpio, String dispLimpio) {
+        return tokenRepository
+                .findByIdDistribuidorAndCodigoDispositivo(idDistribuidor, dispLimpio)
+                .map(existing -> {
+                    if (tokenMapper != null) {
+                        tokenMapper.updateEntity(response, existing);
+                    }
+                    existing.setToken(tokenLimpio);
+                    existing.setTokenType(response.getTokenType());
+                    existing.setExpiresIn(response.getExpiresIn());
+                    existing.setActivo(true);
+                    return existing;
+                })
+                .orElseGet(() -> {
+                    GestoPagoToken nuevo = tokenMapper != null ? tokenMapper.toEntity(response) : new GestoPagoToken();
+                    if (nuevo == null) {
+                        nuevo = new GestoPagoToken();
+                    }
+                    nuevo.setToken(tokenLimpio);
+                    nuevo.setTokenType(response.getTokenType());
+                    nuevo.setExpiresIn(response.getExpiresIn());
+                    nuevo.setIdDistribuidor(idDistribuidor);
+                    nuevo.setCodigoDispositivo(dispLimpio);
+                    nuevo.setActivo(true);
+                    return nuevo;
+                });
     }
 
     @Override

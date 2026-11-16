@@ -3,4 +3,6 @@ build
 .git
 .idea
 .vscode
+frontend
+web
 *.log

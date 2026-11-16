@@ -116,76 +116,16 @@ public class ComprobanteEmailServiceImpl implements ComprobanteEmailService {
 
     @Override
     public String generarHtmlComprobante(ComprobantePagoEmailDto dto) {
-        String logoUrl = dto.getLogoUrl() != null && !dto.getLogoUrl().trim().isEmpty()
-                ? dto.getLogoUrl()
-                : LogoServicioResolver.LOGO_DEFAULT_SERVICIO;
-
-        String montoFormateado = dto.getMontoPagado() != null
-                ? CURRENCY_FORMAT.format(dto.getMontoPagado())
-                : "0.00";
-
-        String comisionFormateada = dto.getComision() != null && dto.getComision().compareTo(BigDecimal.ZERO) > 0
-                ? CURRENCY_FORMAT.format(dto.getComision())
-                : null;
-
+        String logoUrl = resolverLogoUrl(dto.getLogoUrl());
+        String montoFormateado = formatearMonto(dto.getMontoPagado());
+        String comisionFormateada = formatearComision(dto.getComision());
         String cuentaEnmascarada = enmascararCuenta(dto.getNumCuenta());
         String fecha = dto.getFechaProveedor() != null ? dto.getFechaProveedor() : dto.getHoraLocal();
 
         boolean esTelefonico = esServicioTelefonico(dto.getTipoFront(), dto.getServicio(), dto.getProducto());
-
-        // Generar filas para el identificador (Telefono / Referencia segun aplique)
-        StringBuilder filasIdentificador = new StringBuilder();
-
-        if (esTelefonico) {
-            // Escenario 1: Recarga o pago de telefonía móvil -> El identificador principal es el Teléfono
-            filasIdentificador.append("""
-                <tr>
-                    <td style="padding: 10px 0; color: #64748b; font-size: 14px; border-bottom: 1px solid #f1f5f9;">Numero de Telefono:</td>
-                    <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 700; text-align: right; border-bottom: 1px solid #f1f5f9;">%s</td>
-                </tr>
-            """.formatted(dto.getTelefono() != null ? dto.getTelefono() : "No especificado"));
-
-            if (dto.getReferencia() != null && !dto.getReferencia().trim().isEmpty()
-                    && !dto.getReferencia().equals(dto.getTelefono()) && !"0".equals(dto.getReferencia())) {
-                filasIdentificador.append("""
-                    <tr>
-                        <td style="padding: 10px 0; color: #64748b; font-size: 14px; border-bottom: 1px solid #f1f5f9;">Folio / Referencia:</td>
-                        <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 600; text-align: right; border-bottom: 1px solid #f1f5f9;">%s</td>
-                    </tr>
-                """.formatted(dto.getReferencia()));
-            }
-        } else {
-            // Escenario 2: Pago de servicios residenciales/empresariales (Luz, Internet, TV, Agua, Gas) -> El identificador principal es la Referencia
-            filasIdentificador.append("""
-                <tr>
-                    <td style="padding: 10px 0; color: #64748b; font-size: 14px; border-bottom: 1px solid #f1f5f9;">Referencia de Pago:</td>
-                    <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 700; text-align: right; border-bottom: 1px solid #f1f5f9;">%s</td>
-                </tr>
-            """.formatted(dto.getReferencia() != null ? dto.getReferencia() : "No especificada"));
-
-            if (dto.getTelefono() != null && !dto.getTelefono().trim().isEmpty() && !"0".equals(dto.getTelefono())) {
-                filasIdentificador.append("""
-                    <tr>
-                        <td style="padding: 10px 0; color: #64748b; font-size: 14px; border-bottom: 1px solid #f1f5f9;">Telefono Asociado:</td>
-                        <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 600; text-align: right; border-bottom: 1px solid #f1f5f9;">%s</td>
-                    </tr>
-                """.formatted(dto.getTelefono()));
-            }
-        }
-
-        String filaComision = comisionFormateada != null ? """
-            <tr>
-                <td style="padding: 10px 0; color: #64748b; font-size: 14px; border-bottom: 1px solid #f1f5f9;">Comision de Servicio:</td>
-                <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 600; text-align: right; border-bottom: 1px solid #f1f5f9;">$%s MXN</td>
-            </tr>
-        """.formatted(comisionFormateada) : "";
-
-        String seccionLegend = (dto.getLegend() != null && !dto.getLegend().trim().isEmpty()) ? """
-            <div style="margin-top: 24px; padding: 16px; background-color: #f8fafc; border-left: 4px solid #3b82f6; border-radius: 6px;">
-                <p style="margin: 0 0 6px 0; color: #1e293b; font-size: 13px; font-weight: 700;">Aclaraciones y Soporte:</p>
-                <p style="margin: 0; color: #475569; font-size: 12px; line-height: 1.5;">%s</p>
-            </div>
-        """.formatted(dto.getLegend()) : "";
+        String filasIdentificador = construirFilasIdentificador(dto, esTelefonico);
+        String filaComision = construirFilaComision(comisionFormateada);
+        String seccionLegend = construirSeccionLegend(dto.getLegend());
 
         return """
             <!DOCTYPE html>
@@ -278,7 +218,7 @@ public class ComprobanteEmailServiceImpl implements ComprobanteEmailService {
                 dto.getNumAutorizacion() != null ? dto.getNumAutorizacion() : "N/A",
                 dto.getServicio() != null ? dto.getServicio() : "N/A",
                 dto.getProducto() != null ? dto.getProducto() : "N/A",
-                filasIdentificador.toString(),
+                filasIdentificador,
                 filaComision,
                 fecha != null ? fecha : "N/A",
                 dto.getUpc() != null ? dto.getUpc() : "N/A",
@@ -309,5 +249,84 @@ public class ComprobanteEmailServiceImpl implements ComprobanteEmailService {
                 || texto.contains("VIRGIN")
                 || texto.contains("RECARGA")
                 || texto.contains("PAQUETE");
+    }
+
+    private String resolverLogoUrl(String logoUrl) {
+        return (logoUrl != null && !logoUrl.trim().isEmpty())
+                ? logoUrl
+                : LogoServicioResolver.LOGO_DEFAULT_SERVICIO;
+    }
+
+    private String formatearMonto(BigDecimal monto) {
+        return monto != null ? CURRENCY_FORMAT.format(monto) : "0.00";
+    }
+
+    private String formatearComision(BigDecimal comision) {
+        return (comision != null && comision.compareTo(BigDecimal.ZERO) > 0)
+                ? CURRENCY_FORMAT.format(comision)
+                : null;
+    }
+
+    private String construirFilasIdentificador(ComprobantePagoEmailDto dto, boolean esTelefonico) {
+        StringBuilder filas = new StringBuilder();
+        if (esTelefonico) {
+            filas.append("""
+                <tr>
+                    <td style="padding: 10px 0; color: #64748b; font-size: 14px; border-bottom: 1px solid #f1f5f9;">Numero de Telefono:</td>
+                    <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 700; text-align: right; border-bottom: 1px solid #f1f5f9;">%s</td>
+                </tr>
+            """.formatted(dto.getTelefono() != null ? dto.getTelefono() : "No especificado"));
+
+            if (dto.getReferencia() != null && !dto.getReferencia().trim().isEmpty()
+                    && !dto.getReferencia().equals(dto.getTelefono()) && !"0".equals(dto.getReferencia())) {
+                filas.append("""
+                    <tr>
+                        <td style="padding: 10px 0; color: #64748b; font-size: 14px; border-bottom: 1px solid #f1f5f9;">Folio / Referencia:</td>
+                        <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 600; text-align: right; border-bottom: 1px solid #f1f5f9;">%s</td>
+                    </tr>
+                """.formatted(dto.getReferencia()));
+            }
+        } else {
+            filas.append("""
+                <tr>
+                    <td style="padding: 10px 0; color: #64748b; font-size: 14px; border-bottom: 1px solid #f1f5f9;">Referencia de Pago:</td>
+                    <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 700; text-align: right; border-bottom: 1px solid #f1f5f9;">%s</td>
+                </tr>
+            """.formatted(dto.getReferencia() != null ? dto.getReferencia() : "No especificada"));
+
+            if (dto.getTelefono() != null && !dto.getTelefono().trim().isEmpty() && !"0".equals(dto.getTelefono())) {
+                filas.append("""
+                    <tr>
+                        <td style="padding: 10px 0; color: #64748b; font-size: 14px; border-bottom: 1px solid #f1f5f9;">Telefono Asociado:</td>
+                        <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 600; text-align: right; border-bottom: 1px solid #f1f5f9;">%s</td>
+                    </tr>
+                """.formatted(dto.getTelefono()));
+            }
+        }
+        return filas.toString();
+    }
+
+    private String construirFilaComision(String comisionFormateada) {
+        if (comisionFormateada == null) {
+            return "";
+        }
+        return """
+            <tr>
+                <td style="padding: 10px 0; color: #64748b; font-size: 14px; border-bottom: 1px solid #f1f5f9;">Comision de Servicio:</td>
+                <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 600; text-align: right; border-bottom: 1px solid #f1f5f9;">$%s MXN</td>
+            </tr>
+        """.formatted(comisionFormateada);
+    }
+
+    private String construirSeccionLegend(String legend) {
+        if (legend == null || legend.trim().isEmpty()) {
+            return "";
+        }
+        return """
+            <div style="margin-top: 24px; padding: 16px; background-color: #f8fafc; border-left: 4px solid #3b82f6; border-radius: 6px;">
+                <p style="margin: 0 0 6px 0; color: #1e293b; font-size: 13px; font-weight: 700;">Aclaraciones y Soporte:</p>
+                <p style="margin: 0; color: #475569; font-size: 12px; line-height: 1.5;">%s</p>
+            </div>
+        """.formatted(legend);
     }
 }

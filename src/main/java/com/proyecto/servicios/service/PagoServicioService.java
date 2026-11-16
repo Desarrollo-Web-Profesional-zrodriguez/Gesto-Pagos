@@ -6,8 +6,16 @@ import com.proyecto.servicios.entity.gestopago.GestoPagoTransaccion;
 import com.proyecto.servicios.model.gestopago.transaccion.PagoEstatusResponse;
 import com.proyecto.servicios.model.gestopago.transaccion.PagoServicioRequest;
 import com.proyecto.servicios.model.gestopago.transaccion.PagoServicioResponse;
+import com.proyecto.servicios.model.gestopago.transaccion.ValidarReferenciaRequest;
+import com.proyecto.servicios.model.gestopago.transaccion.ValidarReferenciaResponse;
 
 public interface PagoServicioService {
+
+    /**
+     * Valida el servicio/producto en el catálogo, formato de la referencia/teléfono,
+     * estado de cuenta y saldo disponible antes de confirmar la operación de pago.
+     */
+    ValidarReferenciaResponse validarReferencia(ValidarReferenciaRequest request);
 
     /**
      * Procesa el pago de un servicio o recarga validando cliente activo, saldo disponible,

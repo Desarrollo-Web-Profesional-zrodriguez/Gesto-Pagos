@@ -5,8 +5,12 @@ import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.RandomStringUtils;
 import org.springframework.beans.factory.annotation.Value;
@@ -36,6 +40,8 @@ import com.proyecto.servicios.model.gestopago.transaccion.PagoServicioResponse;
 import com.proyecto.servicios.model.gestopago.transaccion.RespuestaSendTx;
 import com.proyecto.servicios.model.gestopago.transaccion.SendTxPayloadDto;
 import com.proyecto.servicios.model.gestopago.transaccion.SendTxXmlResponse;
+import com.proyecto.servicios.model.gestopago.transaccion.ValidarReferenciaRequest;
+import com.proyecto.servicios.model.gestopago.transaccion.ValidarReferenciaResponse;
 import com.proyecto.servicios.repositorys.cliente.ClienteRepository;
 import com.proyecto.servicios.repositorys.cliente.CuentaRepository;
 import com.proyecto.servicios.repositorys.cliente.SesionLoginRepository;
@@ -71,6 +77,9 @@ import lombok.extern.slf4j.Slf4j;
 public class PagoServicioServiceImpl implements PagoServicioService {
 
     private static final DateTimeFormatter HORA_LOCAL_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+    private static final java.security.SecureRandom SECURE_RANDOM = new java.security.SecureRandom();
+    private static final String TELEFONO_DEFECTO_SERVICIOS = "1111111111";
+    private static final String TELEFONO_DEFECTO_PIN = "#1111111111";
     private static final Pattern IDEMPOTENCY_KEY_PATTERN = Pattern.compile("^[A-Za-z0-9_-]{8,64}$");
     private static final int MINUTOS_INACTIVIDAD_SESION = 5;
 
@@ -101,6 +110,114 @@ public class PagoServicioServiceImpl implements PagoServicioService {
 
     @Value("${gestopago.pago.monto-maximo:10000.00}")
     private BigDecimal montoMaximoAbierto = new BigDecimal("10000.00");
+
+    @Override
+    public ValidarReferenciaResponse validarReferencia(ValidarReferenciaRequest request) {
+        String numCuenta = request.getNumCuenta().trim();
+        String cuentaLog = DatosSensibles.enmascararCuenta(numCuenta);
+
+        ProductItemDto productoCatalogo = validarServicioYProductoEnCatalogo(request.getIdServicio(), request.getIdProducto());
+
+        boolean esTipoFront1 = Integer.valueOf(1).equals(productoCatalogo.getTipoFront());
+        boolean esPinOEntretenimiento = Integer.valueOf(10).equals(productoCatalogo.getIdCatTipoServicio())
+                || Integer.valueOf(11).equals(productoCatalogo.getIdCatTipoServicio());
+
+        String telefonoEntrada = request.getTelefono() != null ? request.getTelefono().trim() : "";
+        String referenciaEntrada = request.getReferencia() != null ? request.getReferencia().trim() : "";
+        String referenciaNormalizada;
+        String telefonoNormalizado;
+
+        if (!esTipoFront1) {
+            if (referenciaEntrada.isEmpty()
+                    || referenciaEntrada.length() < 4
+                    || !referenciaEntrada.matches("^[a-zA-Z0-9]{4,100}$")
+                    || referenciaEntrada.matches("^0+$")) {
+                throw new ReglaNegocioException(CatalogoCodigoError.GESTOPAGO_55_REFERENCIA_INVALIDA,
+                        "La referencia ingresada no cumple con el formato valido para el servicio " + productoCatalogo.getServicio());
+            }
+            referenciaNormalizada = referenciaEntrada;
+            telefonoNormalizado = !telefonoEntrada.isEmpty() ? telefonoEntrada : TELEFONO_DEFECTO_SERVICIOS;
+        } else if (esPinOEntretenimiento) {
+            telefonoNormalizado = !telefonoEntrada.isEmpty() ? telefonoEntrada : TELEFONO_DEFECTO_PIN;
+            referenciaNormalizada = !referenciaEntrada.isEmpty() ? referenciaEntrada : telefonoNormalizado;
+        } else {
+            String soloDigitos = telefonoEntrada.startsWith("#") ? telefonoEntrada.substring(1) : telefonoEntrada;
+            if (!soloDigitos.matches("^\\d{10}$") || soloDigitos.matches("^0{10}$")) {
+                throw new ReglaNegocioException(CatalogoCodigoError.GESTOPAGO_55_REFERENCIA_INVALIDA,
+                        "El numero telefonico de 10 digitos ingresado no es valido para el servicio " + productoCatalogo.getServicio());
+            }
+            telefonoNormalizado = soloDigitos;
+            referenciaNormalizada = !referenciaEntrada.isEmpty() ? referenciaEntrada : soloDigitos;
+        }
+
+        Cuenta cuenta = cuentaRepository.findByNumeroCuenta(numCuenta)
+                .orElseThrow(() -> new CuentaNoEncontradaException(cuentaLog));
+        if (!"ACTIVA".equalsIgnoreCase(cuenta.getEstatus())) {
+            throw new ReglaNegocioException(CatalogoCodigoError.CUENTA_INACTIVA,
+                    "La cuenta " + cuentaLog + " no se encuentra activa");
+        }
+
+        Cliente cliente = clienteRepository.findByCuentasNumeroCuenta(numCuenta)
+                .orElseThrow(() -> new ClienteNoEncontradoException(
+                        "No se encontro cliente titular asociado a la cuenta: " + cuentaLog));
+        if (!Boolean.TRUE.equals(cliente.getActivo())) {
+            throw new ReglaNegocioException(CatalogoCodigoError.CLIENTE_INACTIVO,
+                    "El cliente titular de la cuenta se encuentra inactivo");
+        }
+
+        BigDecimal saldoDisponible = (cuenta.getSaldo() != null && cuenta.getSaldo().getSaldoDisponible() != null)
+                ? BigDecimal.valueOf(cuenta.getSaldo().getSaldoDisponible()).setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+
+        BigDecimal precioCatalogo = productoCatalogo.getPrecio() != null
+                ? productoCatalogo.getPrecio().setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        boolean esPrecioFijo = (productoCatalogo.getTipoFront() == null || Integer.valueOf(1).equals(productoCatalogo.getTipoFront()))
+                && productoCatalogo.getPrecio() != null && productoCatalogo.getPrecio().signum() > 0;
+
+        BigDecimal montoValidado = null;
+        if (request.getMonto() != null) {
+            montoValidado = request.getMonto().setScale(2, RoundingMode.HALF_UP);
+            validarMontoContraCatalogo(productoCatalogo, montoValidado);
+        } else if (esPrecioFijo) {
+            montoValidado = precioCatalogo;
+        }
+
+        BigDecimal comisionEstimada = (!esTipoFront1 && precioCatalogo.signum() > 0)
+                ? precioCatalogo
+                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        boolean saldoSuficiente = montoValidado == null || saldoDisponible.compareTo(montoValidado) >= 0;
+
+        String urlReferenciaAyuda = Boolean.TRUE.equals(productoCatalogo.getShowAyuda())
+                ? logoServicioResolver.resolverUrlReferenciaPuntoRed(productoCatalogo.getIdServicio())
+                : null;
+
+        return ValidarReferenciaResponse.builder()
+                .valida(true)
+                .mensaje("Referencia validada correctamente para " + productoCatalogo.getServicio())
+                .idServicio(productoCatalogo.getIdServicio())
+                .servicio(productoCatalogo.getServicio())
+                .idProducto(productoCatalogo.getIdProducto())
+                .producto(productoCatalogo.getProducto())
+                .tipoFront(productoCatalogo.getTipoFront())
+                .idCatTipoServicio(productoCatalogo.getIdCatTipoServicio())
+                .tipoReferencia(productoCatalogo.getTipoReferencia())
+                .hasDigitoVerificador(productoCatalogo.getHasDigitoVerificador())
+                .legend(productoCatalogo.getLegend())
+                .urlLogo(productoCatalogo.getUrlLogo())
+                .urlReferenciaAyuda(urlReferenciaAyuda)
+                .referenciaNormalizada(referenciaNormalizada)
+                .telefonoNormalizado(telefonoNormalizado)
+                .precioCatalogo(precioCatalogo)
+                .comisionEstimada(comisionEstimada)
+                .montoValidado(montoValidado)
+                .totalEstimado(montoValidado)
+                .numCuentaEnmascarada(cuentaLog)
+                .saldoDisponibleActual(saldoDisponible)
+                .saldoSuficiente(saldoSuficiente)
+                .fechaVerificacion(LocalDateTime.now())
+                .build();
+    }
 
     @Override
     public PagoServicioResponse procesarPago(PagoServicioRequest request, String idempotencyKey) {
@@ -136,7 +253,7 @@ public class PagoServicioServiceImpl implements PagoServicioService {
 
         // 6. Construir y cifrar el payload ANTES de tocar el saldo (si falla, no hay nada que revertir)
         String horaLocal = LocalDateTime.now().format(HORA_LOCAL_FORMATTER);
-        String upc = RandomStringUtils.randomAlphanumeric(10);
+        String upc = RandomStringUtils.random(10, 0, 0, true, true, null, SECURE_RANDOM);
         boolean esTipoFront1 = Integer.valueOf(1).equals(productoCatalogo.getTipoFront());
         boolean esPinOEntretenimiento = Integer.valueOf(10).equals(productoCatalogo.getIdCatTipoServicio())
                 || Integer.valueOf(11).equals(productoCatalogo.getIdCatTipoServicio());
@@ -154,8 +271,8 @@ public class PagoServicioServiceImpl implements PagoServicioService {
             // - idCatTipoServicio 10 / 11 (Prepago / Entretenimiento / Gift Card): telefono fijo "#1111111111"
             // - Resto de tipoFront 1 (Recargas): telefono de 10 digitos obligatorio; no se envia referencia ni montoPago
             if (esPinOEntretenimiento) {
-                telefonoPayload = "#1111111111";
-                telefono = !telefonoEntrada.isEmpty() ? telefonoEntrada : "#1111111111";
+                telefonoPayload = TELEFONO_DEFECTO_PIN;
+                telefono = !telefonoEntrada.isEmpty() ? telefonoEntrada : TELEFONO_DEFECTO_PIN;
             } else {
                 String soloDigitos = telefonoEntrada.startsWith("#") ? telefonoEntrada.substring(1) : telefonoEntrada;
                 if (!soloDigitos.matches("^\\d{10}$")) {
@@ -175,8 +292,8 @@ public class PagoServicioServiceImpl implements PagoServicioService {
                 throw new ReglaNegocioException(CatalogoCodigoError.DATOS_ENTRADA_INVALIDOS,
                         "La referencia es obligatoria para el pago de servicios (tipoFront 2)");
             }
-            telefonoPayload = "1111111111";
-            telefono = !telefonoEntrada.isEmpty() ? telefonoEntrada : "1111111111";
+            telefonoPayload = TELEFONO_DEFECTO_SERVICIOS;
+            telefono = !telefonoEntrada.isEmpty() ? telefonoEntrada : TELEFONO_DEFECTO_SERVICIOS;
             referenciaPayload = referenciaEntrada;
             referencia = referenciaEntrada;
             montoPagoPayload = montoPago;
@@ -263,7 +380,7 @@ public class PagoServicioServiceImpl implements PagoServicioService {
         }
 
         BigDecimal comisionProveedor = parsearDecimalSeguro(xml.getComision());
-        String idTx = xml.getIdTx() != null ? xml.getIdTx() : (xml.getMensaje() != null ? xml.getMensaje().getIdTx() : null);
+        String idTx = extraerIdTxXml(xml);
         String pin = (xml.getMensaje() != null) ? xml.getMensaje().getPin() : null;
         String legend = (xml.getMensaje() != null && xml.getMensaje().getLegend() != null)
                 ? xml.getMensaje().getLegend().trim()
@@ -280,9 +397,7 @@ public class PagoServicioServiceImpl implements PagoServicioService {
         }
 
         // Comprobante por correo (no bloqueante: un fallo de Brevo jamás afecta un pago ya aplicado)
-        String emailDestino = (request.getCorreoElectronico() != null && !request.getCorreoElectronico().trim().isEmpty())
-                ? request.getCorreoElectronico().trim()
-                : (cliente.getCorreoElectronico() != null ? cliente.getCorreoElectronico().trim() : null);
+        String emailDestino = resolverEmailDestino(request.getCorreoElectronico(), cliente.getCorreoElectronico());
         String nombreCliente = ((cliente.getNombre() != null ? cliente.getNombre() : "") + " "
                 + (cliente.getApellidoPaterno() != null ? cliente.getApellidoPaterno() : "")).trim();
 
@@ -358,7 +473,61 @@ public class PagoServicioServiceImpl implements PagoServicioService {
 
     @Override
     public List<GestoPagoTransaccion> obtenerHistorialPorCuenta(String numeroCuenta) {
-        return transaccionRepository.findByNumeroCuentaOrderByFechaCreacionDesc(numeroCuenta.trim());
+        List<GestoPagoTransaccion> historial = transaccionRepository.findByNumeroCuentaOrderByFechaCreacionDesc(numeroCuenta.trim());
+        if (historial == null || historial.isEmpty()) {
+            return historial;
+        }
+
+        List<ProductItemDto> catalogo = obtenerCatalogoPlanoSilencioso();
+        Map<String, ProductItemDto> porServicioYProducto = catalogo.stream()
+                .filter(p -> p.getIdServicio() != null && p.getIdProducto() != null)
+                .collect(Collectors.toMap(
+                        p -> p.getIdServicio() + ":" + p.getIdProducto(),
+                        Function.identity(),
+                        (a, b) -> a
+                ));
+        Map<Long, ProductItemDto> porServicio = catalogo.stream()
+                .filter(p -> p.getIdServicio() != null)
+                .collect(Collectors.toMap(
+                        ProductItemDto::getIdServicio,
+                        Function.identity(),
+                        (a, b) -> a
+                ));
+
+        for (GestoPagoTransaccion tx : historial) {
+            ProductItemDto prod = porServicioYProducto.get(tx.getIdServicio() + ":" + tx.getIdProducto());
+            if (prod == null) {
+                prod = porServicio.get(tx.getIdServicio());
+            }
+
+            if (prod != null) {
+                tx.setServicio(prod.getServicio());
+                tx.setProducto(prod.getProducto());
+                String logo = (prod.getUrlLogo() != null && !prod.getUrlLogo().trim().isEmpty())
+                        ? prod.getUrlLogo()
+                        : logoServicioResolver.resolverUrlLogo(prod.getServicio(), prod.getProducto(), tx.getIdServicio(), tx.getIdProducto());
+                tx.setUrlLogo(logo);
+            } else {
+                tx.setServicio("Servicio #" + tx.getIdServicio());
+                tx.setProducto("Producto #" + tx.getIdProducto());
+                tx.setUrlLogo(logoServicioResolver.resolverUrlLogo(null, null, tx.getIdServicio(), tx.getIdProducto()));
+            }
+        }
+        return historial;
+    }
+
+    private List<ProductItemDto> obtenerCatalogoPlanoSilencioso() {
+        try {
+            ProductCategorizedResponse catalogo = productoService.obtenerProductosCategorizados();
+            if (catalogo != null && catalogo.getCategorias() != null && !catalogo.getCategorias().isEmpty()) {
+                return catalogo.getCategorias().values().stream()
+                        .flatMap(Collection::stream)
+                        .toList();
+            }
+        } catch (Exception e) {
+            log.debug("[PagoServicio]: No se pudo consultar el catalogo para enriquecer historial ({})", e.getMessage());
+        }
+        return Collections.emptyList();
     }
 
     @Override
@@ -508,11 +677,10 @@ public class PagoServicioServiceImpl implements PagoServicioService {
         String limpio = valor2fa.trim();
 
         // Opción 1 (Camino principal solicitado): Biometría Facial MediaPipe
-        if (usuario.getBiometricoFacialEmbedding() != null && !usuario.getBiometricoFacialEmbedding().trim().isEmpty()) {
-            if (BiometriaFacialUtil.coincideEmbedding(usuario.getBiometricoFacialEmbedding(), limpio)) {
-                log.info("[PagoServicio 2FA]: Validacion exitosa mediante Biometria Facial para clienteId={}", cliente.getIdCliente());
-                return;
-            }
+        if (usuario.getBiometricoFacialEmbedding() != null && !usuario.getBiometricoFacialEmbedding().trim().isEmpty()
+                && BiometriaFacialUtil.coincideEmbedding(usuario.getBiometricoFacialEmbedding(), limpio)) {
+            log.info("[PagoServicio 2FA]: Validacion exitosa mediante Biometria Facial para clienteId={}", cliente.getIdCliente());
+            return;
         }
 
         // Opción 2: Token de sesión activa del cliente (proveniente de /auth/login)
@@ -543,6 +711,26 @@ public class PagoServicioServiceImpl implements PagoServicioService {
 
         throw new AutenticacionException(CatalogoCodigoError.AUTENTICACION_2FA_FALLIDA,
                 "Validacion 2FA fallida: el vector biometrico facial, token de sesion o credencial no coincide con el titular de la cuenta");
+    }
+
+    private String extraerIdTxXml(SendTxXmlResponse xml) {
+        if (xml.getIdTx() != null) {
+            return xml.getIdTx();
+        }
+        if (xml.getMensaje() != null) {
+            return xml.getMensaje().getIdTx();
+        }
+        return null;
+    }
+
+    private String resolverEmailDestino(String correoRequest, String correoCliente) {
+        if (correoRequest != null && !correoRequest.trim().isEmpty()) {
+            return correoRequest.trim();
+        }
+        if (correoCliente != null) {
+            return correoCliente.trim();
+        }
+        return null;
     }
 
     private BigDecimal parsearDecimalSeguro(String valor) {

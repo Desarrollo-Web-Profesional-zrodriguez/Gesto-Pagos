@@ -1,18 +1,14 @@
 package com.proyecto.servicios.cron;
 
 
-import com.proyecto.servicios.entity.gestopago.GestoPagoProducto;
-import com.proyecto.servicios.mapper.GestoPagoProductoMapper;
 import com.proyecto.servicios.model.gestopago.catalogo.ProductItemDto;
 import com.proyecto.servicios.model.gestopago.catalogo.ProductListResponse;
-import com.proyecto.servicios.repositorys.gestopago.GestoPagoProductoRepository;
 import com.proyecto.servicios.service.ProductoService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -25,8 +21,6 @@ import java.util.stream.Collectors;
 public class CatalogoProductosCron {
     private final ProductoService productoService;
     private final RedisTemplate<String, Object> redisTemplate;
-    private final GestoPagoProductoRepository productoRepository;
-    private final GestoPagoProductoMapper productoMapper;
 
     @Value("${gestopago.redis.catalogo-key:gestopago:catalogo:productos_por_tipo_front}")
     private String redisKey;
@@ -35,13 +29,9 @@ public class CatalogoProductosCron {
     private Long redisTtlSeconds;
    
     public CatalogoProductosCron(ProductoService productoService,
-                                 RedisTemplate<String, Object> redisTemplate,
-                                 GestoPagoProductoRepository productoRepository,
-                                 GestoPagoProductoMapper productoMapper) {
+                                 RedisTemplate<String, Object> redisTemplate) {
         this.productoService = productoService;
         this.redisTemplate = redisTemplate;
-        this.productoRepository = productoRepository;
-        this.productoMapper = productoMapper;
     }
 
     /**
@@ -109,17 +99,9 @@ public class CatalogoProductosCron {
     /**
      * Fallback para guardar/actualizar en PostgreSQL si Redis Falló.
      */
-    @Transactional 
     public void guardarEnBaseDatos(List<ProductItemDto> productos) {
         try {
-            log.info("[POSTGRESQL] Limpiando registros anteriores y guardando {} productos...", productos.size());
-            // Eliminar todo lo anterior siempre y cuando responde 200
-            productoRepository.deleteAllInBatch();
-            // Usamos MapStruct para convertir la lista de DTOs a entidades
-            List<GestoPagoProducto> entidades = productoMapper.toEntityList(productos);
-            // Guardamos todos los nuevos productos
-            productoRepository.saveAll(entidades);
-            log.info("[POSTGRESQL ÉXITO] Base de datos actualizada con {} productos de respaldos.", entidades.size());
+            productoService.guardarEnBaseDatos(productos);
         } catch (Exception e) {
             log.error("[POSTGRESQL ERROR] Error al guardar productos en PostgreSQL: {}", e.getMessage());
         }

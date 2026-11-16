@@ -1,7 +1,6 @@
 package com.proyecto.servicios.service.cliente.impl;
 
 import java.util.List;
-import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,7 +38,7 @@ public class CuentaServiceImpl implements CuentaService {
     public List<CuentaResponse> obtenerCuentasActivas() {
         return cuentaRepository.findByEstatus("ACTIVA").stream()
                 .map(this::mapearACuentaResponse)
-                .collect(Collectors.toList());
+                .toList();
     }
 
     @Override
