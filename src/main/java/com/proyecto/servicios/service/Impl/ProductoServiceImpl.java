@@ -23,6 +23,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.proyecto.servicios.util.LogoServicioResolver;
 import java.io.StringReader;
+import java.time.Duration;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -44,6 +45,9 @@ public class ProductoServiceImpl implements ProductoService {
 
     @Value("${gestopago.redis.catalogo-key:gestopago:catalogo:productos_por_tipo_front}")
     private String redisKey;
+
+    @Value("${gestopago.redis.catalogo-ttl-seconds:90000}")
+    private long redisTtlSeconds = 90000L;
     
     public ProductoServiceImpl(GestoPagoProductClient productClient,
                                GestoPagoTokenService tokenService,
@@ -197,6 +201,15 @@ public class ProductoServiceImpl implements ProductoService {
                         LinkedHashMap::new,
                         Collectors.toList()
                 ));
+        try {
+            if (redisTemplate != null && redisTemplate.opsForValue() != null) {
+                redisTemplate.opsForValue().set(redisKey, categoriasBD, Duration.ofSeconds(redisTtlSeconds));
+                log.info("[REDIS] Catálogo repoblado en caché desde PostgreSQL ({} productos, TTL={}s).",
+                        productosBD.size(), redisTtlSeconds);
+            }
+        } catch (Exception e) {
+            log.warn("[REDIS ERROR] No se pudo repoblar Redis desde PostgreSQL: {}", e.getMessage());
+        }
         return ProductCategorizedResponse.builder()
                 .status(200)
                 .message("Catálogo obtenido exitosamente desde base de datos")
