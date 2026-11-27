@@ -1,17 +1,25 @@
 package com.proyecto.servicios.service;
 
 import java.io.StringReader;
+import java.security.SecureRandom;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
 import java.util.Set;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.proyecto.servicios.client.GestoPagoProductClient;
 import com.proyecto.servicios.exception.CatalogoCodigoError;
 import com.proyecto.servicios.model.gestopago.transaccion.RespuestaSendTx;
 import com.proyecto.servicios.model.gestopago.transaccion.RespuestaSendTx.Veredicto;
 import com.proyecto.servicios.model.gestopago.transaccion.SendTxXmlResponse;
+import com.proyecto.servicios.util.AesEncryption;
 
 import feign.FeignException;
 import jakarta.xml.bind.JAXBContext;
@@ -42,11 +50,24 @@ public class GestoPagoSendTxGateway {
     private static final String EXPIRED_TOKEN_TEXT = "EXPIRED";
     /** Códigos del proveedor que significan "en proceso", "falla aguas abajo" o "timeout (82 -> requiere confirmTx)". */
     private static final Set<String> CODIGOS_INDETERMINADOS = Set.of("07", "08", "82");
+    private static final SecureRandom SIM_RANDOM = new SecureRandom();
+    private static final DateTimeFormatter FECHA_PROVEEDOR_FMT =
+            DateTimeFormatter.ofPattern("dd/MMM/yyyy HH:mm:ss", Locale.ENGLISH);
+    private static final ObjectMapper SIM_MAPPER = new ObjectMapper();
 
     private final GestoPagoTokenService tokenService;
     private final GestoPagoProductClient gestoPagoClient;
     private final JAXBContext jaxbContext;
     private final XMLInputFactory xmlInputFactory;
+
+    @Value("${gestopago.simulacion.habilitada:false}")
+    private boolean simulacionHabilitada = false;
+
+    @Value("${gestopago.aes.secret-key:}")
+    private String aesSecretKey;
+
+    @Value("${gestopago.aes.iv:}")
+    private String aesIv;
 
     public GestoPagoSendTxGateway(GestoPagoTokenService tokenService, GestoPagoProductClient gestoPagoClient) {
         this.tokenService = tokenService;
@@ -64,6 +85,10 @@ public class GestoPagoSendTxGateway {
 
     /** Ejecuta sendTx con el payload ya cifrado y nunca lanza: siempre devuelve un veredicto. */
     public RespuestaSendTx ejecutar(String payloadCifrado, String upc) {
+        if (simulacionHabilitada) {
+            return ejecutarSimulado(payloadCifrado, upc);
+        }
+
         String token;
         try {
             token = tokenService.obtenerTokenValido();
@@ -183,6 +208,81 @@ public class GestoPagoSendTxGateway {
         } finally {
             reader.close();
         }
+    }
+
+    private RespuestaSendTx ejecutarSimulado(String payloadCifrado, String upc) {
+        String referencia = "";
+        String monto = "0.00";
+        boolean esPin = false;
+        try {
+            if (aesSecretKey != null && !aesSecretKey.isBlank() && aesIv != null && !aesIv.isBlank()) {
+                String json = AesEncryption.AESCipher(AesEncryption.Mode.DECRYPT.name(), payloadCifrado, aesIv, aesSecretKey);
+                if (json != null && !json.isBlank()) {
+                    JsonNode root = SIM_MAPPER.readTree(json);
+                    if (root.hasNonNull("referencia")) {
+                        referencia = root.get("referencia").asText("");
+                    }
+                    if (root.hasNonNull("montoPago")) {
+                        monto = root.get("montoPago").asText("0.00");
+                    }
+                    if (root.hasNonNull("telefono") && root.get("telefono").asText("").startsWith("#")) {
+                        esPin = true;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("[sendTx SIM]: No se pudo leer detalle del payload cifrado para UPC={}", upc);
+        }
+
+        long idTx = 960_000_000L + SIM_RANDOM.nextInt(39_999_999);
+        long numAuth = 100_000_000L + SIM_RANDOM.nextInt(899_999_999);
+        String fecha = LocalDateTime.now().format(FECHA_PROVEEDOR_FMT);
+        String refXml = escaparXml(referencia);
+        String pinNode = esPin ? "<PIN>" + generarPinSimulado() + "</PIN>" : "";
+
+        String xmlSimulado = "<?xml version='1.0' encoding='UTF-8'?>"
+                + "<RESPONSE>"
+                + "<ID_TX>" + idTx + "</ID_TX>"
+                + "<NUM_AUTORIZACION>" + numAuth + "</NUM_AUTORIZACION>"
+                + "<SALDO>50000.00</SALDO>"
+                + "<COMISION>0.00</COMISION>"
+                + "<SALDO_F>50,000.00</SALDO_F>"
+                + "<COMISION_F>0.00</COMISION_F>"
+                + "<FECHA>" + fecha + "</FECHA>"
+                + "<MONTO>" + escaparXml(monto) + "</MONTO>"
+                + "<MENSAJE>"
+                + "<CODIGO>01</CODIGO>"
+                + "<TEXTO>Operacion realizada con exito (Simulacion GestoPago)</TEXTO>"
+                + "<REFERENCIA>" + refXml + "</REFERENCIA>"
+                + pinNode
+                + "</MENSAJE>"
+                + "</RESPONSE>";
+
+        log.info("[sendTx SIMULADO]: UPC={} aprobado en modo simulacion ID_TX={} AUTH={}", upc, idTx, numAuth);
+        return clasificar(xmlSimulado, upc);
+    }
+
+    private String generarPinSimulado() {
+        String chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        StringBuilder sb = new StringBuilder("SIM-");
+        for (int i = 0; i < 12; i++) {
+            if (i > 0 && i % 4 == 0) {
+                sb.append('-');
+            }
+            sb.append(chars.charAt(SIM_RANDOM.nextInt(chars.length())));
+        }
+        return sb.toString();
+    }
+
+    private String escaparXml(String valor) {
+        if (valor == null) {
+            return "";
+        }
+        return valor.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&apos;");
     }
 
     private RespuestaSendTx noEnviado(CatalogoCodigoError error) {
