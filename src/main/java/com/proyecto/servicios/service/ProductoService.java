@@ -1,0 +1,26 @@
+package com.proyecto.servicios.service;
+
+import java.util.List;
+import com.proyecto.servicios.model.gestopago.catalogo.ProductCategorizedResponse;
+import com.proyecto.servicios.model.gestopago.catalogo.ProductItemDto;
+import com.proyecto.servicios.model.gestopago.catalogo.ProductListResponse;
+
+public interface ProductoService {
+
+    /**
+     * Consulta directamente a GestoPago (usado exclusivamente por el Cron de las 6 AM)
+     */
+    ProductListResponse obtenerListaProductos();
+
+    /**
+     * Consulta el catálogo categorizado para el Controlador.
+     * 1. Consulta el último registro disponible en Redis
+     * 2. Si Redis no tiene respuesta o falla, consulta el respaldo en PostgreSQL
+     */
+    ProductCategorizedResponse obtenerProductosCategorizados();
+
+    /**
+     * Guarda el catálogo en la base de datos de respaldo (PostgreSQL).
+     */
+    void guardarEnBaseDatos(List<ProductItemDto> productos);
+} 
