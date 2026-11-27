@@ -26,6 +26,7 @@ public class ComprobantePagoEmailDto {
     private String referencia;
     private BigDecimal montoPagado;
     private BigDecimal comision;
+    private String pin;
     private String legend;
     private String fechaProveedor;
     private String horaLocal;
