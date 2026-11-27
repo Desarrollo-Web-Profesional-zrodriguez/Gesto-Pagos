@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
 
-/// Representa un error o respuesta estructurada (`GenericResponse`) devuelta por el backend.
+/// Representa un error o respuesta estructurada devuelta por el servicio.
 class ApiException implements Exception {
   const ApiException({
     required this.mensaje,
@@ -35,8 +35,9 @@ class ApiException implements Exception {
 
   factory ApiException.fromResponse(int? statusCode, Object? data) {
     if (data is Map<String, dynamic>) {
-      final mensaje = (data['mensaje'] ?? data['message'] ?? 'Error de servidor')
-          .toString();
+      var mensaje =
+          (data['mensaje'] ?? data['message'] ?? 'No se pudo completar la operación')
+              .toString();
       final rawDetalles = data['detallesValidacion'];
       final Map<String, String> detalles = {};
       if (rawDetalles is Map) {
@@ -44,6 +45,11 @@ class ApiException implements Exception {
           detalles[entry.key.toString()] = entry.value.toString();
         }
       }
+      if (detalles.isNotEmpty &&
+          mensaje.startsWith('Datos de entrada no validos en la peticion:')) {
+        mensaje = 'Por favor revisa la información ingresada en los campos marcados.';
+      }
+      mensaje = _commercializeMessage(mensaje);
       final codigoCatalogo = data['codigoCatalogo']?.toString();
       final codigo = data['codigo'] is int
           ? data['codigo'] as int
@@ -62,7 +68,10 @@ class ApiException implements Exception {
     }
 
     if (data is String && data.trim().isNotEmpty) {
-      return ApiException(statusCode: statusCode, mensaje: data.trim());
+      return ApiException(
+        statusCode: statusCode,
+        mensaje: _commercializeMessage(data.trim()),
+      );
     }
 
     return ApiException(
@@ -83,21 +92,21 @@ class ApiException implements Exception {
       case DioExceptionType.sendTimeout:
         return const ApiException(
           mensaje:
-              'Tiempo de espera agotado al conectar con el servidor. Verifica tu conexión o URL base.',
+              'Tiempo de espera agotado al conectar con el servicio. Verifica tu conexión a internet.',
         );
       case DioExceptionType.receiveTimeout:
         return const ApiException(
           mensaje:
-              'El servidor tardó demasiado en responder. Si realizaste un pago, verifica el historial antes de reintentar.',
+              'El servicio tardó demasiado en responder. Si realizaste un pago, verifica tu historial antes de reintentar.',
         );
       case DioExceptionType.connectionError:
         return const ApiException(
           mensaje:
-              'No fue posible conectar con el servidor backend. Verifica que esté encendido y accesible.',
+              'No fue posible establecer conexión en este momento. Verifica tu acceso a internet e intenta nuevamente.',
         );
       default:
-        return ApiException(
-          mensaje: e.message ?? 'Error de red inesperado al comunicar con la API.',
+        return const ApiException(
+          mensaje: 'Error de conexión inesperado. Intenta nuevamente.',
         );
     }
   }
@@ -109,26 +118,42 @@ class ApiException implements Exception {
     return match?.group(1) ?? match?.group(2);
   }
 
+  static String _commercializeMessage(String raw) {
+    final lower = raw.toLowerCase();
+    if (lower.contains('no tiene registrado perfil biometrico facial')) {
+      return 'Tu cuenta aún no tiene reconocimiento facial activo. Inicia sesión con tu contraseña y actívalo desde Mi Perfil.';
+    }
+    if (lower.contains('biometrico facial es distinto')) {
+      return 'No pudimos confirmar tu identidad facial. Asegúrate de contar con buena iluminación y mirar de frente.';
+    }
+    if (lower.contains('proporcionar contrasena o')) {
+      return 'Ingresa tu contraseña o verifica tu identidad facial para continuar.';
+    }
+    if (lower.contains('validacion 2fa fallida')) {
+      return 'No se pudo autorizar la operación. Verifica tu identidad o contraseña e intenta nuevamente.';
+    }
+    return raw;
+  }
+
   static String _fallbackByStatus(int? statusCode) {
     switch (statusCode) {
       case 400:
-        return 'Datos inválidos en la petición.';
+        return 'Revisa los datos ingresados.';
       case 401:
-        return 'Autenticación fallida o sesión inválida.';
+        return 'Credenciales inválidas o sesión expirada.';
       case 403:
-        return 'Acceso denegado o usuario inactivo.';
+        return 'Acceso restringido o cuenta inactiva.';
       case 404:
-        return 'Recurso no encontrado.';
+        return 'No se encontró el registro solicitado.';
       case 409:
-        return 'Conflicto o solicitud duplicada.';
+        return 'Ya existe una operación o registro equivalente.';
       case 422:
         return 'Operación no procesable (saldo insuficiente o monto inválido).';
       case 502:
-        return 'Falla de comunicación con el proveedor GestoPago.';
       case 503:
-        return 'Catálogo o servicio temporalmente no disponible.';
+        return 'Servicio temporalmente no disponible. Intenta más tarde.';
       default:
-        return 'Ocurrió un error al procesar la solicitud.';
+        return 'Ocurrió un inconveniente al procesar tu solicitud.';
     }
   }
 

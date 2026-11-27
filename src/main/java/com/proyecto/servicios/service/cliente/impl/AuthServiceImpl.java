@@ -2,6 +2,7 @@ package com.proyecto.servicios.service.cliente.impl;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
@@ -10,6 +11,8 @@ import org.springframework.transaction.annotation.Transactional;
 import com.proyecto.servicios.entity.cliente.SesionLogin;
 import com.proyecto.servicios.entity.cliente.UsuarioLogin;
 import com.proyecto.servicios.exception.AutenticacionException;
+import com.proyecto.servicios.exception.ReglaNegocioException;
+import com.proyecto.servicios.model.cliente.BiometriaFacialRequest;
 import com.proyecto.servicios.model.cliente.LoginRequest;
 import com.proyecto.servicios.model.cliente.LoginResponse;
 import com.proyecto.servicios.repositorys.cliente.SesionLoginRepository;
@@ -80,6 +83,7 @@ public class AuthServiceImpl implements AuthService {
                 .idCliente(usuario.getCliente() != null ? usuario.getCliente().getIdCliente() : null)
                 .username(usuario.getUsername())
                 .nombreCliente(resolverNombreCliente(usuario))
+                .biometriaFacialActiva(tieneBiometriaRegistrada(usuario))
                 .mensaje("Inicio de sesion exitoso. Inactividad maxima permitida: 5 minutos.")
                 .build();
     }
@@ -132,6 +136,64 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public boolean validarSesion(String tokenSesion) {
+        obtenerSesionActivaRenovada(tokenSesion);
+        return true;
+    }
+
+    @Override
+    @Transactional
+    public Map<String, Object> configurarBiometriaFacial(String tokenSesion, BiometriaFacialRequest request) {
+        SesionLogin sesion = obtenerSesionActivaRenovada(tokenSesion);
+        UsuarioLogin usuario = sesion.getUsuario();
+        if (usuario == null || !Boolean.TRUE.equals(usuario.getActivo())) {
+            throw new AutenticacionException("El usuario se encuentra inactivo");
+        }
+
+        if (request == null || request.getPasswordActual() == null || request.getPasswordActual().trim().isEmpty()) {
+            throw new AutenticacionException("Ingresa tu contrasena actual para confirmar la operacion");
+        }
+
+        if (!PasswordEncryptionUtil.verificarPassword(request.getPasswordActual(), usuario.getPasswordHash())) {
+            throw new AutenticacionException("La contrasena actual ingresada es incorrecta");
+        }
+
+        if (Boolean.TRUE.equals(request.getEliminar())) {
+            usuario.setBiometricoFacialEmbedding(null);
+            usuarioLoginRepository.save(usuario);
+            log.info("[Auth]: Reconocimiento facial desactivado para usuario: {}", usuario.getUsername());
+            return Map.of(
+                    "biometriaFacialActiva", false,
+                    "mensaje", "Reconocimiento facial desactivado en tu cuenta."
+            );
+        }
+
+        String embedding = request.getBiometricoFacialEmbedding();
+        if (!BiometriaFacialUtil.esEmbeddingValido(embedding)) {
+            throw new ReglaNegocioException(
+                    "El registro facial capturado no es valido. Centra tu rostro con buena iluminacion e intenta de nuevo.");
+        }
+
+        usuario.setBiometricoFacialEmbedding(embedding.trim());
+        usuarioLoginRepository.save(usuario);
+        log.info("[Auth]: Reconocimiento facial configurado exitosamente para usuario: {}", usuario.getUsername());
+        return Map.of(
+                "biometriaFacialActiva", true,
+                "mensaje", "Reconocimiento facial activado correctamente en tu cuenta."
+        );
+    }
+
+    @Override
+    @Transactional
+    public Map<String, Object> consultarEstadoBiometria(String tokenSesion) {
+        SesionLogin sesion = obtenerSesionActivaRenovada(tokenSesion);
+        UsuarioLogin usuario = sesion.getUsuario();
+        return Map.of(
+                "biometriaFacialActiva", tieneBiometriaRegistrada(usuario),
+                "username", usuario != null ? usuario.getUsername() : ""
+        );
+    }
+
+    private SesionLogin obtenerSesionActivaRenovada(String tokenSesion) {
         if (tokenSesion == null || tokenSesion.trim().isEmpty()) {
             throw new AutenticacionException("Token de sesion no proporcionado");
         }
@@ -156,8 +218,13 @@ public class AuthServiceImpl implements AuthService {
         sesion.setUltimoAcceso(ahora);
         sesion.setFechaExpiracion(ahora.plusMinutes(MINUTOS_INACTIVIDAD));
         sesionLoginRepository.save(sesion);
+        return sesion;
+    }
 
-        return true;
+    private boolean tieneBiometriaRegistrada(UsuarioLogin usuario) {
+        return usuario != null
+                && usuario.getBiometricoFacialEmbedding() != null
+                && !usuario.getBiometricoFacialEmbedding().trim().isEmpty();
     }
 
     @Override

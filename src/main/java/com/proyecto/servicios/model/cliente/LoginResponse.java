@@ -24,5 +24,6 @@ public class LoginResponse {
     private Long idCliente;
     private String username;
     private String nombreCliente;
+    private Boolean biometriaFacialActiva;
     private String mensaje;
 }

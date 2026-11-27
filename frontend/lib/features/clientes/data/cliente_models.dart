@@ -138,6 +138,7 @@ class ClienteDto {
     required this.empresa,
     required this.ingresoMensual,
     required this.activo,
+    this.biometriaFacialActiva = false,
     this.fechaCreacion,
     this.fechaModificacion,
     this.domicilios = const [],
@@ -164,6 +165,7 @@ class ClienteDto {
   final String empresa;
   final double ingresoMensual;
   final bool activo;
+  final bool biometriaFacialActiva;
   final String? fechaCreacion;
   final String? fechaModificacion;
   final List<DomicilioDto> domicilios;
@@ -171,6 +173,35 @@ class ClienteDto {
 
   CuentaDto? get cuentaPrincipal =>
       cuentas.isNotEmpty ? cuentas.first : null;
+
+  ClienteDto copyWith({bool? biometriaFacialActiva}) => ClienteDto(
+        nombre: nombre,
+        segundoNombre: segundoNombre,
+        apellidoPaterno: apellidoPaterno,
+        apellidoMaterno: apellidoMaterno,
+        nombreCompleto: nombreCompleto,
+        fechaNacimiento: fechaNacimiento,
+        edad: edad,
+        curp: curp,
+        rfc: rfc,
+        sexo: sexo,
+        idNacionalidad: idNacionalidad,
+        nacionalidad: nacionalidad,
+        estadoCivil: estadoCivil,
+        correoElectronico: correoElectronico,
+        telefonoMovil: telefonoMovil,
+        telefonoAlternativo: telefonoAlternativo,
+        ocupacion: ocupacion,
+        empresa: empresa,
+        ingresoMensual: ingresoMensual,
+        activo: activo,
+        biometriaFacialActiva:
+            biometriaFacialActiva ?? this.biometriaFacialActiva,
+        fechaCreacion: fechaCreacion,
+        fechaModificacion: fechaModificacion,
+        domicilios: domicilios,
+        cuentas: cuentas,
+      );
 
   factory ClienteDto.fromJson(Map<String, dynamic> json) => ClienteDto(
         nombre: json['nombre']?.toString() ?? '',
@@ -193,6 +224,7 @@ class ClienteDto {
         empresa: json['empresa']?.toString() ?? '',
         ingresoMensual: (json['ingresoMensual'] as num?)?.toDouble() ?? 0.0,
         activo: json['activo'] == true,
+        biometriaFacialActiva: json['biometriaFacialActiva'] == true,
         fechaCreacion: json['fechaCreacion']?.toString(),
         fechaModificacion: json['fechaModificacion']?.toString(),
         domicilios: (json['domicilios'] as List<dynamic>? ?? const [])

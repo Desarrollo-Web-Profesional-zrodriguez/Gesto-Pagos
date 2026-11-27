@@ -15,6 +15,7 @@ class ProductItemDto {
     this.tipoReferencia,
     this.legend,
     this.urlLogo,
+    this.urlReferenciaAyuda,
   });
 
   final int idProducto;
@@ -29,6 +30,7 @@ class ProductItemDto {
   final String? tipoReferencia;
   final String? legend;
   final String? urlLogo;
+  final String? urlReferenciaAyuda;
 
   bool get esTipoFront1 => tipoFront == 1;
 
@@ -41,6 +43,15 @@ class ProductItemDto {
 
   bool get esPrecioFijo =>
       (tipoFront != 2) && precio != null && precio! > 0;
+
+  String get etiquetaFlujo {
+    if (tipoFront == 1) {
+      return esPinOEntretenimiento
+          ? 'PIN / Entretenimiento'
+          : 'Recarga Telefónica';
+    }
+    return 'Pago de Servicio';
+  }
 
   factory ProductItemDto.fromJson(Map<String, dynamic> json) => ProductItemDto(
         idProducto: (json['idProducto'] as num).toInt(),
@@ -55,6 +66,7 @@ class ProductItemDto {
         tipoReferencia: json['tipoReferencia']?.toString(),
         legend: json['legend']?.toString(),
         urlLogo: json['urlLogo']?.toString(),
+        urlReferenciaAyuda: json['urlReferenciaAyuda']?.toString(),
       );
 }
 
@@ -74,7 +86,8 @@ class ProductCategorizedResponseDto {
   final Map<int, List<ProductItemDto>> categorias;
 
   factory ProductCategorizedResponseDto.fromJson(Map<String, dynamic> json) {
-    final rawCategorias = json['categorias'] as Map<String, dynamic>? ?? const {};
+    final rawCategorias =
+        json['categorias'] as Map<String, dynamic>? ?? const {};
     final parsed = <int, List<ProductItemDto>>{};
 
     for (final entry in rawCategorias.entries) {

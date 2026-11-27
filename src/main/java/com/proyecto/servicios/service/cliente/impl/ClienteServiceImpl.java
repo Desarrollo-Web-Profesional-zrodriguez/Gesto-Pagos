@@ -695,6 +695,12 @@ public class ClienteServiceImpl implements ClienteService {
                     .build();
         }).toList();
 
+        boolean biometriaFacialActiva = c.getIdCliente() != null
+                && usuarioLoginRepository.findByClienteIdCliente(c.getIdCliente())
+                        .map(u -> u.getBiometricoFacialEmbedding() != null
+                                && !u.getBiometricoFacialEmbedding().trim().isEmpty())
+                        .orElse(false);
+
         return ClienteResponse.builder()
                 .idCliente(c.getIdCliente())
                 .nombre(c.getNombre())
@@ -717,6 +723,7 @@ public class ClienteServiceImpl implements ClienteService {
                 .empresa(c.getEmpresa())
                 .ingresoMensual(c.getIngresoMensual())
                 .activo(c.getActivo())
+                .biometriaFacialActiva(biometriaFacialActiva)
                 .fechaCreacion(c.getFechaCreacion())
                 .fechaModificacion(c.getFechaModificacion())
                 .domicilios(domDtos)

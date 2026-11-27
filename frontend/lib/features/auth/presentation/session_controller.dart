@@ -33,6 +33,9 @@ class SessionState {
   String? get token => loginResponse?.tokenSesion;
   CuentaDto? get cuentaPrincipal => cuentaActiva ?? cliente?.cuentaPrincipal;
   String? get numeroCuentaPrincipal => cuentaPrincipal?.numeroCuenta;
+  bool get tieneBiometriaFacial =>
+      (cliente?.biometriaFacialActiva ?? false) ||
+      (loginResponse?.biometriaFacialActiva ?? false);
 
   SessionState copyWith({
     LoginResponseDto? loginResponse,
@@ -389,6 +392,36 @@ class SessionController extends Notifier<SessionState> {
       secondsRemaining: 0,
       expiredMessage: reason,
     );
+  }
+
+  Future<BiometriaConfigResultDto> configurarBiometriaFacial({
+    required String passwordActual,
+    String? embedding,
+    bool eliminar = false,
+  }) async {
+    final currentToken = state.token;
+    if (currentToken == null || currentToken.isEmpty) {
+      throw StateError('No hay una sesión activa para actualizar tu perfil.');
+    }
+
+    final res = await ref.read(authRepositoryProvider).configurarBiometriaFacial(
+          token: currentToken,
+          passwordActual: passwordActual,
+          biometricoFacialEmbedding: embedding,
+          eliminar: eliminar,
+        );
+
+    final ttl = (state.loginResponse?.minutosInactividadMaximos ?? 5) * 60;
+    state = state.copyWith(
+      cliente: state.cliente?.copyWith(
+        biometriaFacialActiva: res.biometriaFacialActiva,
+      ),
+      loginResponse: state.loginResponse?.copyWith(
+        biometriaFacialActiva: res.biometriaFacialActiva,
+      ),
+      secondsRemaining: ttl,
+    );
+    return res;
   }
 
   void _startTimer() {

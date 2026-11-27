@@ -1,6 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gestopago_app/app/theme/app_theme.dart';
+import 'package:gestopago_app/core/biometrics/face_embedding_provider.dart';
+import 'package:gestopago_app/core/biometrics/fingerprint_auth_service.dart';
 import 'package:gestopago_app/core/network/strict_decimal_json.dart';
 import 'package:gestopago_app/core/validation/backend_validators.dart';
 import 'package:gestopago_app/core/widgets/app_feedback.dart';
@@ -9,6 +13,10 @@ import 'package:gestopago_app/features/catalogo_productos/data/producto_reposito
 import 'package:gestopago_app/features/pagos/data/pago_repository.dart';
 import 'package:gestopago_app/features/pagos/presentation/pago_resultado_views.dart';
 import 'package:uuid/uuid.dart';
+
+enum _PagoPhase { captura, confirmacion, rechazado }
+
+enum _TwoFaMode { token, password, rostro, huella }
 
 class PagoScreen extends ConsumerStatefulWidget {
   const PagoScreen({
@@ -23,18 +31,31 @@ class PagoScreen extends ConsumerStatefulWidget {
 }
 
 class _PagoScreenState extends ConsumerState<PagoScreen> {
+  static const List<String> _quickAmounts = [
+    '50.00',
+    '100.00',
+    '200.00',
+    '500.00',
+  ];
+
   final _formKey = GlobalKey<FormState>();
   final _montoCtrl = TextEditingController();
   final _telefonoCtrl = TextEditingController();
   final _referenciaCtrl = TextEditingController();
   final _correoCtrl = TextEditingController();
+  final _twoFaPassCtrl = TextEditingController();
 
   String _idempotencyKey = _generateKey();
+  _PagoPhase _phase = _PagoPhase.captura;
+  _TwoFaMode _twoFaMode = _TwoFaMode.token;
+  bool _obscureTwoFaPass = true;
+  bool _huellaDisponible = false;
   bool _validating = false;
   bool _submitting = false;
   bool _confirmadoExplicitamente = false;
   ValidarReferenciaResponseDto? _validacionResult;
   Object? _error;
+  String? _validationSummary;
 
   static String _generateKey() =>
       'gp-${const Uuid().v4().replaceAll('-', '').substring(0, 20)}';
@@ -47,8 +68,20 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
       _montoCtrl.text = StrictDecimal.fromDouble(p.precio!).toStrictLiteral();
     }
     final session = ref.read(sessionControllerProvider);
-    _correoCtrl.text =
-        session.cliente?.correoElectronico ?? session.loginResponse?.username ?? '';
+    _correoCtrl.text = session.cliente?.correoElectronico ??
+        session.loginResponse?.username ??
+        '';
+    _checkFingerprint();
+  }
+
+  Future<void> _checkFingerprint() async {
+    if (kIsWeb) return;
+    final ok = await ref
+        .read(fingerprintAuthServiceProvider)
+        .estaDisponibleEnTelefono();
+    if (mounted) {
+      setState(() => _huellaDisponible = ok);
+    }
   }
 
   @override
@@ -57,32 +90,48 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
     _telefonoCtrl.dispose();
     _referenciaCtrl.dispose();
     _correoCtrl.dispose();
+    _twoFaPassCtrl.dispose();
     super.dispose();
   }
 
   void _onParamChanged() {
-    setState(() {
-      _idempotencyKey = _generateKey();
-      _validacionResult = null;
-      _confirmadoExplicitamente = false;
-      _error = null;
-    });
+    if (_validacionResult != null || _error != null || _validationSummary != null) {
+      setState(() {
+        _idempotencyKey = _generateKey();
+        _validacionResult = null;
+        _confirmadoExplicitamente = false;
+        _error = null;
+        _validationSummary = null;
+      });
+    }
   }
 
   Future<void> _validarReferencia() async {
-    if (!(_formKey.currentState?.validate() ?? false)) return;
+    setState(() {
+      _error = null;
+      _validationSummary = null;
+    });
+
+    if (!(_formKey.currentState?.validate() ?? false)) {
+      setState(() {
+        _validationSummary =
+            'Revisa los campos marcados antes de validar el servicio.';
+      });
+      return;
+    }
+
     final numCuenta =
         ref.read(sessionControllerProvider).numeroCuentaPrincipal;
     if (numCuenta == null || numCuenta.isEmpty) {
       setState(() {
-        _error = 'No se encontró una cuenta de 16 dígitos asociada a tu perfil.';
+        _error =
+            'No se encontró una cuenta de 16 dígitos asociada a tu perfil.';
       });
       return;
     }
 
     setState(() {
       _validating = true;
-      _error = null;
       _validacionResult = null;
       _confirmadoExplicitamente = false;
     });
@@ -114,7 +163,12 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
         });
         return;
       }
-      setState(() => _validacionResult = res);
+      setState(() {
+        _validacionResult = res;
+        _idempotencyKey = _generateKey();
+        _confirmadoExplicitamente = false;
+        _phase = _PagoPhase.confirmacion;
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e);
@@ -123,183 +177,147 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
     }
   }
 
-  Future<String?> _ask2FA() async {
-    final passCtrl = TextEditingController();
-    final bioCtrl = TextEditingController(
-      text: '[0.12, -0.45, 0.89, -0.05, 0.67]',
-    );
-    String selectedMode = 'token';
+  Future<String?> _resolve2FaSecret() async {
     final token = ref.read(sessionControllerProvider).token;
-
-    final result = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => Padding(
-          padding: EdgeInsets.fromLTRB(
-            20,
-            20,
-            20,
-            20 + MediaQuery.of(ctx).viewInsets.bottom,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text(
-                'Confirmación de Seguridad (2FA)',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'El endpoint POST /pagos requiere validar tu identidad con sesión activa, contraseña o biometría facial.',
-                style: TextStyle(fontSize: 12.5, color: AppColors.mutedText),
-              ),
-              const SizedBox(height: 14),
-              SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(
-                    value: 'token',
-                    label: Text('Sesión'),
-                    icon: Icon(Icons.verified_user_outlined),
-                  ),
-                  ButtonSegment(
-                    value: 'password',
-                    label: Text('Clave'),
-                    icon: Icon(Icons.lock_outline),
-                  ),
-                  ButtonSegment(
-                    value: 'biometric',
-                    label: Text('Biometría'),
-                    icon: Icon(Icons.face_retouching_natural),
-                  ),
-                ],
-                selected: {selectedMode},
-                onSelectionChanged: (val) {
-                  setModalState(() => selectedMode = val.first);
-                },
-              ),
-              const SizedBox(height: 12),
-              if (selectedMode == 'token') ...[
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Text(
-                    'Se utilizará tu token de sesión activa vigente como factor 2FA seguro.',
-                    style: TextStyle(fontSize: 12.5, color: AppColors.primary),
-                  ),
-                ),
-              ] else if (selectedMode == 'password') ...[
-                TextField(
-                  controller: passCtrl,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Contraseña de tu cuenta',
-                    prefixIcon: Icon(Icons.lock_outline),
-                  ),
-                ),
-              ] else ...[
-                TextField(
-                  controller: bioCtrl,
-                  maxLines: 2,
-                  decoration: const InputDecoration(
-                    labelText: 'Vector biométrico facial (MediaPipe)',
-                    prefixIcon: Icon(Icons.face),
-                    hintText: '[0.12, -0.45, 0.89, -0.05, 0.67]',
-                  ),
-                ),
-                const SizedBox(height: 4),
-                const Text(
-                  'Vector de flotantes JSON registrado con MediaPipe Face Landmarker.',
-                  style: TextStyle(fontSize: 11, color: AppColors.mutedText),
-                ),
-              ],
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: () {
-                  if (selectedMode == 'token') {
-                    if (token != null && token.isNotEmpty) {
-                      Navigator.of(ctx).pop(token);
-                    }
-                    return;
-                  }
-                  if (selectedMode == 'password') {
-                    if (passCtrl.text.trim().isNotEmpty) {
-                      Navigator.of(ctx).pop(passCtrl.text.trim());
-                    }
-                    return;
-                  }
-                  if (selectedMode == 'biometric') {
-                    if (bioCtrl.text.trim().isNotEmpty) {
-                      Navigator.of(ctx).pop(bioCtrl.text.trim());
-                    }
-                    return;
-                  }
-                },
-                child: const Text('Autorizar y pagar'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    passCtrl.dispose();
-    bioCtrl.dispose();
-    return result;
+    switch (_twoFaMode) {
+      case _TwoFaMode.token:
+        if (token == null || token.isEmpty) {
+          setState(() {
+            _validationSummary =
+                'Tu sesión no está disponible. Inicia sesión nuevamente.';
+          });
+          return null;
+        }
+        return token;
+      case _TwoFaMode.password:
+        final pass = _twoFaPassCtrl.text.trim();
+        if (pass.isEmpty) {
+          setState(() {
+            _validationSummary =
+                'Ingresa tu contraseña de cuenta para autorizar el pago.';
+          });
+          return null;
+        }
+        return pass;
+      case _TwoFaMode.rostro:
+        final embedding =
+            await ref.read(faceEmbeddingProvider).captureFacialEmbedding(
+                  context,
+                  title: 'Autorizar Pago con Rostro',
+                  subtitle:
+                      'Mira de frente a la cámara para autorizar este cargo',
+                );
+        if (embedding == null || embedding.isEmpty) {
+          if (mounted) {
+            setState(() {
+              _validationSummary =
+                  'Completa el escaneo facial o elige otro método para autorizar el pago.';
+            });
+          }
+          return null;
+        }
+        return embedding;
+      case _TwoFaMode.huella:
+        final authRes = await ref
+            .read(fingerprintAuthServiceProvider)
+            .autenticarConHuella(
+              motivo: 'Confirma tu identidad para autorizar el pago',
+            );
+        if (!authRes.autenticado) {
+          if (mounted) {
+            setState(() {
+              _error = authRes.mensaje ?? 'Verificación biométrica cancelada.';
+            });
+          }
+          return null;
+        }
+        if (token == null || token.isEmpty) {
+          if (mounted) {
+            setState(() {
+              _error = 'Tu sesión expiró. Inicia sesión nuevamente.';
+            });
+          }
+          return null;
+        }
+        return token;
+    }
   }
 
   Future<void> _submit() async {
-    if (_validacionResult == null || !_validacionResult!.valida) {
+    final val = _validacionResult;
+    if (val == null || !val.valida) {
       setState(() {
-        _error =
-            'Debes verificar y validar la referencia antes de confirmar el pago.';
+        _phase = _PagoPhase.captura;
+        _error = 'Debes verificar el servicio antes de confirmar el pago.';
       });
       return;
+    }
+    if (val.saldoSuficiente == false) {
+      setState(() {
+        _validationSummary =
+            'Tu saldo disponible es insuficiente para cubrir esta operación.';
+      });
+      return;
+    }
+    if (_correoCtrl.text.trim().isNotEmpty) {
+      final emailErr = BackendValidators.email(
+        _correoCtrl.text,
+        requiredField: false,
+      );
+      if (emailErr != null) {
+        setState(() => _validationSummary = emailErr);
+        return;
+      }
     }
     if (!_confirmadoExplicitamente) {
       setState(() {
-        _error =
-            'Marca la confirmación explícita del resumen de operación para continuar.';
+        _validationSummary =
+            'Marca la casilla de confirmación explícita para autorizar el cargo.';
       });
       return;
     }
-    if (!(_formKey.currentState?.validate() ?? false)) return;
 
     final numCuenta =
         ref.read(sessionControllerProvider).numeroCuentaPrincipal;
     if (numCuenta == null || numCuenta.isEmpty) {
       setState(() {
-        _error = 'No se encontró una cuenta de 16 dígitos asociada a tu perfil.';
+        _error =
+            'No se encontró una cuenta de 16 dígitos asociada a tu perfil.';
       });
       return;
     }
 
-    final factor2fa = await _ask2FA();
+    final factor2fa = await _resolve2FaSecret();
     if (factor2fa == null || !mounted) return;
 
     setState(() {
       _submitting = true;
       _error = null;
+      _validationSummary = null;
     });
 
     try {
       final p = widget.producto;
+      final montoToSend = StrictDecimal.tryParse(_montoCtrl.text) ??
+          StrictDecimal.fromDouble(val.montoValidado ?? p.precio ?? 0);
+
       final req = PagoServicioRequestDto(
         numCuenta: numCuenta,
         idServicio: p.idServicio,
         idProducto: p.idProducto,
-        monto: StrictDecimal.parse(_montoCtrl.text),
+        monto: montoToSend,
         telefono: p.esRecargaTelefonica
-            ? _telefonoCtrl.text
+            ? (val.telefonoNormalizado ?? _telefonoCtrl.text)
             : (_telefonoCtrl.text.trim().isNotEmpty
                 ? _telefonoCtrl.text
                 : null),
-        referencia: p.esPagoServicio ? _referenciaCtrl.text : null,
+        referencia: p.esPagoServicio
+            ? (val.referenciaNormalizada ?? _referenciaCtrl.text)
+            : null,
         codigo2fa: factor2fa,
-        correoElectronico: _correoCtrl.text,
+        correoElectronico: _correoCtrl.text.trim().isNotEmpty
+            ? _correoCtrl.text.trim()
+            : null,
       );
 
       final result = await ref.read(pagoRepositoryProvider).realizarPago(
@@ -307,7 +325,13 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
             idempotencyKey: _idempotencyKey,
           );
 
-      await ref.read(sessionControllerProvider.notifier).refrescarSaldoActual();
+      try {
+        await ref
+            .read(sessionControllerProvider.notifier)
+            .refrescarSaldoActual();
+      } catch (_) {}
+      ref.read(historyRefreshSignalProvider.notifier).bump();
+
       if (!mounted) return;
 
       switch (result) {
@@ -318,8 +342,10 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
                 comprobante: comprobante,
                 tipoFront: p.tipoFront,
                 destinatarioDefault: _correoCtrl.text.trim(),
-                nombreDefault:
-                    ref.read(sessionControllerProvider).loginResponse?.nombreCliente,
+                nombreDefault: ref
+                    .read(sessionControllerProvider)
+                    .loginResponse
+                    ?.nombreCliente,
               ),
             ),
           );
@@ -334,12 +360,23 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
               ),
             );
           } else {
-            setState(() => _error = mensaje);
+            setState(() {
+              _error = mensaje;
+              _phase = _PagoPhase.rechazado;
+            });
           }
       }
     } catch (e) {
+      try {
+        await ref
+            .read(sessionControllerProvider.notifier)
+            .refrescarSaldoActual();
+      } catch (_) {}
       if (!mounted) return;
-      setState(() => _error = e);
+      setState(() {
+        _error = e;
+        _phase = _PagoPhase.rechazado;
+      });
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -349,262 +386,444 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
   Widget build(BuildContext context) {
     final p = widget.producto;
     final cuenta = ref.watch(sessionControllerProvider).cuentaPrincipal;
-    final val = _validacionResult;
+    final stepIndex = _phase == _PagoPhase.captura ? 0 : 1;
 
     return Scaffold(
-      appBar: AppBar(title: Text(p.servicio)),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      _ServiceLogo(url: p.urlLogo),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              p.producto,
-                              style: const TextStyle(
-                                fontSize: 17,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'idServicio: ${p.idServicio} • idProducto: ${p.idProducto} • tipoFront: ${p.tipoFront}',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: AppColors.mutedText,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (p.esPagoServicio && p.precio != null && p.precio! > 0) ...[
-                    const SizedBox(height: 10),
-                    Text(
-                      'Comisión estimada de catálogo: ${formatMxn(p.precio)}',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.secondary,
-                      ),
-                    ),
-                  ],
-                  if (p.legend != null && p.legend!.trim().isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: AppColors.background,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        p.legend!,
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
+      appBar: AppBar(
+        backgroundColor: AppColors.slate950,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              p.producto,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
             ),
-          ),
-          const SizedBox(height: 12),
-          if (cuenta != null)
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.account_balance_wallet_outlined),
-                title: Text('Cargo a ${maskCuenta(cuenta.numeroCuenta)}'),
-                subtitle: Text(
-                  'Disponible: ${formatMxn(cuenta.saldo?.saldoDisponible)}',
-                ),
-              ),
+            Text(
+              '${p.servicio} · ${p.etiquetaFlujo}',
+              style: const TextStyle(fontSize: 11.5, color: Color(0xFF94A3B8)),
             ),
-          const SizedBox(height: 12),
-          if (_error != null) ...[
-            ErrorBanner(error: _error!),
-            const SizedBox(height: 12),
           ],
-          Card(
-            child: Padding(
+        ),
+      ),
+      body: Column(
+        children: [
+          PagoPhaseProgressBar(activeIndex: stepIndex),
+          Expanded(
+            child: ListView(
               padding: const EdgeInsets.all(16),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Text(
-                      'Paso 1: Datos y Validación de Referencia',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.primary,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    if (p.esPinOEntretenimiento)
-                      Container(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: AppColors.secondary.withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: const Text(
-                          'Producto PIN / Entretenimiento: no requiere referencia ni teléfono; el PIN se entregará en el comprobante inmediato.',
-                          style: TextStyle(fontSize: 12.5),
-                        ),
-                      ),
-                    if (p.esRecargaTelefonica) ...[
-                      TextFormField(
-                        controller: _telefonoCtrl,
-                        keyboardType: TextInputType.phone,
-                        maxLength: 10,
-                        onChanged: (_) => _onParamChanged(),
-                        decoration: const InputDecoration(
-                          labelText: 'Teléfono a recargar (10 dígitos) *',
-                          counterText: '',
-                        ),
-                        validator: (v) => BackendValidators.telefono(v),
-                      ),
-                      const SizedBox(height: 12),
-                    ],
-                    if (p.esPagoServicio) ...[
-                      TextFormField(
-                        controller: _referenciaCtrl,
-                        onChanged: (_) => _onParamChanged(),
-                        decoration: InputDecoration(
-                          labelText: p.tipoReferencia != null &&
-                                  p.tipoReferencia!.trim().isNotEmpty
-                              ? 'Referencia del servicio (${p.tipoReferencia}) *'
-                              : 'Referencia del servicio (alfanumérica) *',
-                        ),
-                        validator: (v) => BackendValidators.referenciaPago(
-                          v,
-                          requiredField: true,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                    ],
-                    TextFormField(
-                      controller: _montoCtrl,
-                      readOnly: p.esPrecioFijo,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      onChanged: (_) => _onParamChanged(),
-                      decoration: InputDecoration(
-                        labelText: p.esPrecioFijo
-                            ? 'Monto fijo del producto (MXN)'
-                            : 'Monto a pagar (MXN, 1.00 - 10,000.00) *',
-                        helperText: p.esPrecioFijo
-                            ? 'El catálogo define precio fijo para este producto'
-                            : 'Se enviará estrictamente con 2 decimales (ej. 150.00)',
-                      ),
-                      validator: (v) => p.esPrecioFijo
-                          ? BackendValidators.montoDecimal(v, 'El monto')
-                          : BackendValidators.montoDecimal(
-                              v,
-                              'El monto',
-                              min: 1.00,
-                              max: 10000.00,
-                            ),
-                    ),
-                    if (p.esPagoServicio) ...[
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _telefonoCtrl,
-                        keyboardType: TextInputType.phone,
-                        maxLength: 10,
-                        onChanged: (_) => _onParamChanged(),
-                        decoration: const InputDecoration(
-                          labelText: 'Teléfono asociado (opcional)',
-                          counterText: '',
-                        ),
-                        validator: (v) => BackendValidators.telefono(
-                          v,
-                          requiredField: false,
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: _correoCtrl,
-                      keyboardType: TextInputType.emailAddress,
-                      decoration: const InputDecoration(
-                        labelText: 'Correo para comprobante (opcional)',
-                      ),
-                      validator: (v) => BackendValidators.email(
-                        v,
-                        requiredField: false,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    OutlinedButton.icon(
-                      onPressed:
-                          (_validating || _submitting) ? null : _validarReferencia,
-                      icon: _validating
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.fact_check_outlined),
-                      label: Text(
-                        _validating
-                            ? 'Verificando con el servicio...'
-                            : '1. Verificar referencia y validar servicio',
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              children: [
+                if (_error != null && _phase != _PagoPhase.rechazado) ...[
+                  ErrorBanner(
+                    error: _error!,
+                    onDismiss: () => setState(() => _error = null),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                if (_validationSummary != null) ...[
+                  ValidationSummary(
+                    message: _validationSummary,
+                    onDismiss: () => setState(() => _validationSummary = null),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                if (_phase == _PagoPhase.captura)
+                  _buildPhase1Captura(p, cuenta?.numeroCuenta, cuenta?.saldo?.saldoDisponible)
+                else if (_phase == _PagoPhase.confirmacion)
+                  _buildPhase2Confirmacion(p, _validacionResult!)
+                else
+                  _buildPhase3CRechazado(),
+              ],
             ),
           ),
-          if (val != null && val.valida) ...[
-            const SizedBox(height: 14),
-            Card(
-              color: const Color(0xFFF0FDF4),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-                side: BorderSide(
-                  color: AppColors.accent.withValues(alpha: 0.45),
-                ),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPhase1Captura(
+    ProductItemDto p,
+    String? numCuenta,
+    double? saldoDisponible,
+  ) {
+    final ayudaUrl = p.urlReferenciaAyuda?.trim();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   children: [
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.verified,
-                          color: AppColors.accent,
-                        ),
-                        const SizedBox(width: 8),
-                        const Expanded(
-                          child: Text(
-                            'Paso 2: Resumen de la Operación (Referencia Verificada)',
-                            style: TextStyle(
+                    ServiceLogo(
+                      urlLogo: p.urlLogo,
+                      tipoFront: p.tipoFront,
+                      size: 48,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            p.producto,
+                            style: const TextStyle(
                               fontWeight: FontWeight.w800,
                               fontSize: 15,
-                              color: Color(0xFF065F46),
+                              color: AppColors.primary,
+                            ),
+                          ),
+                          Text(
+                            p.servicio,
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              color: AppColors.mutedText,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const Divider(height: 20, color: Color(0xFFF1F5F9)),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Disponible: ${formatMxn(saldoDisponible)}',
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF047857),
+                      ),
+                    ),
+                    Text(
+                      'Cuenta: ${maskCuenta(numCuenta)}',
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 12,
+                        color: AppColors.mutedText,
+                      ),
+                    ),
+                  ],
+                ),
+                if (p.legend != null && p.legend!.trim().isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppColors.skySoft,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(
+                          Icons.info_outline,
+                          size: 16,
+                          color: AppColors.secondary,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            p.legend!.trim(),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppColors.sky950,
                             ),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 6),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    '1. Captura de Datos y Validación',
+                    style: TextStyle(
+                      fontSize: 15.5,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  if (p.esPinOEntretenimiento) ...[
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppColors.violetSoft,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Text(
+                        'Producto digital / entretenimiento: no requiere número de referencia; recibirás tu PIN digital en el comprobante.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppColors.violet,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    TextFormField(
+                      controller: _telefonoCtrl,
+                      keyboardType: TextInputType.phone,
+                      maxLength: 10,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      onChanged: (_) => _onParamChanged(),
+                      decoration: const InputDecoration(
+                        labelText: 'Teléfono asociado (opcional, 10 dígitos)',
+                        counterText: '',
+                        hintText: '5512345678',
+                      ),
+                      validator: (v) => BackendValidators.telefono(
+                        v,
+                        requiredField: false,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  if (p.esRecargaTelefonica) ...[
+                    TextFormField(
+                      controller: _telefonoCtrl,
+                      keyboardType: TextInputType.phone,
+                      maxLength: 10,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      onChanged: (_) => _onParamChanged(),
+                      decoration: const InputDecoration(
+                        labelText: 'Número telefónico celular (10 dígitos) *',
+                        prefixIcon: Icon(Icons.smartphone_outlined),
+                        counterText: '',
+                        hintText: '5512345678',
+                      ),
+                      validator: (v) => BackendValidators.telefono(v),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  if (p.esPagoServicio) ...[
+                    TextFormField(
+                      controller: _referenciaCtrl,
+                      onChanged: (_) => _onParamChanged(),
+                      decoration: InputDecoration(
+                        labelText: p.tipoReferencia != null &&
+                                p.tipoReferencia!.trim().isNotEmpty
+                            ? 'Referencia (${p.tipoReferencia}) *'
+                            : 'Referencia o línea de captura *',
+                        prefixIcon: const Icon(Icons.receipt_outlined),
+                        hintText: 'Ej. 25720381',
+                      ),
+                      validator: (v) => BackendValidators.referenciaPago(
+                        v,
+                        requiredField: true,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  TextFormField(
+                    controller: _montoCtrl,
+                    readOnly: p.esPrecioFijo,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    onChanged: (_) => _onParamChanged(),
+                    decoration: InputDecoration(
+                      labelText: p.esPrecioFijo
+                          ? 'Importe fijo del producto *'
+                          : 'Importe a pagar (1.00 - 10,000.00) *',
+                      prefixText: r'$ ',
+                      suffixText: 'MXN',
+                      helperText: p.esPrecioFijo
+                          ? 'Este producto tiene precio fijo definido'
+                          : 'Ingresa un importe con hasta 2 decimales',
+                    ),
+                    validator: (v) => p.esPrecioFijo
+                        ? BackendValidators.montoDecimal(v, 'El importe')
+                        : BackendValidators.montoDecimal(
+                            v,
+                            'El importe',
+                            min: 1.00,
+                            max: 10000.00,
+                          ),
+                  ),
+                  if (!p.esPrecioFijo) ...[
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        const Text(
+                          'Importes rápidos:',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.mutedText,
+                          ),
+                        ),
+                        ..._quickAmounts.map((amt) {
+                          final selected = _montoCtrl.text.trim() == amt;
+                          return ChoiceChip(
+                            label: Text(
+                              '\$$amt',
+                              style: const TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            selected: selected,
+                            onSelected: (_) {
+                              setState(() {
+                                _montoCtrl.text = amt;
+                                _validationSummary = null;
+                                _error = null;
+                              });
+                            },
+                          );
+                        }),
+                      ],
+                    ),
+                  ],
+                  if (p.esPagoServicio) ...[
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _telefonoCtrl,
+                      keyboardType: TextInputType.phone,
+                      maxLength: 10,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      onChanged: (_) => _onParamChanged(),
+                      decoration: const InputDecoration(
+                        labelText: 'Teléfono asociado (opcional)',
+                        counterText: '',
+                      ),
+                      validator: (v) => BackendValidators.telefono(
+                        v,
+                        requiredField: false,
+                      ),
+                    ),
+                    if (p.precio != null && p.precio! > 0) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Comisión estimada para este servicio: ${formatMxn(p.precio)}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.secondary,
+                        ),
+                      ),
+                    ],
+                  ],
+                  if (ayudaUrl != null && ayudaUrl.startsWith('http')) ...[
+                    const SizedBox(height: 14),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppColors.background,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Guía visual para localizar tu referencia:',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.mutedText,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.network(
+                              ayudaUrl,
+                              height: 140,
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 18),
+                  FilledButton(
+                    onPressed: _validating ? null : _validarReferencia,
+                    child: _validating
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text('Validar y continuar'),
+                              SizedBox(width: 8),
+                              Icon(Icons.arrow_forward_rounded, size: 18),
+                            ],
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPhase2Confirmacion(
+    ProductItemDto p,
+    ValidarReferenciaResponseDto val,
+  ) {
+    final ayudaUrl = val.urlReferenciaAyuda?.trim() ?? p.urlReferenciaAyuda?.trim();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppColors.emeraldSoft,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.accent.withValues(alpha: 0.4)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.verified, color: AppColors.accent),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '2. Referencia Verificada',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14.5,
+                        color: Color(0xFF065F46),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
                     Text(
                       val.mensaje,
                       style: const TextStyle(
@@ -612,148 +831,493 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
                         color: Color(0xFF047857),
                       ),
                     ),
-                    const Divider(height: 20),
-                    _SummaryRow('Servicio', val.servicio),
-                    _SummaryRow('Producto', val.producto),
-                    if (val.referenciaNormalizada != null)
-                      _SummaryRow('Referencia verificada', val.referenciaNormalizada!),
-                    if (val.telefonoNormalizado != null && p.esRecargaTelefonica)
-                      _SummaryRow('Teléfono verificado', val.telefonoNormalizado!),
-                    if (val.numCuentaEnmascarada != null)
-                      _SummaryRow('Cuenta cargo', val.numCuentaEnmascarada!),
-                    if (val.saldoDisponibleActual != null)
-                      _SummaryRow(
-                        'Saldo disponible',
-                        formatMxn(val.saldoDisponibleActual),
-                      ),
-                    if (val.comisionEstimada != null && val.comisionEstimada! > 0)
-                      _SummaryRow(
-                        'Comisión catálogo',
-                        formatMxn(val.comisionEstimada),
-                      ),
-                    if (val.montoValidado != null)
-                      _SummaryRow(
-                        'Importe a pagar',
-                        formatMxn(val.montoValidado),
-                        bold: true,
-                      ),
-                    if (val.saldoSuficiente == false) ...[
-                      const SizedBox(height: 8),
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: AppColors.danger.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: const Text(
-                          'Advertencia: El saldo disponible es menor al importe a pagar.',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.danger,
-                          ),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 8),
-                    CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      controlAffinity: ListTileControlAffinity.leading,
-                      value: _confirmadoExplicitamente,
-                      onChanged: _submitting
-                          ? null
-                          : (v) => setState(
-                                () => _confirmadoExplicitamente = v ?? false,
-                              ),
-                      title: const Text(
-                        'Confirmo que los datos del servicio, referencia e importe son correctos.',
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'RESUMEN PREVIO AL CARGO',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.9,
+                    color: AppColors.mutedText,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _SummaryRow('Servicio', val.servicio),
+                _SummaryRow('Producto', val.producto),
+                if (val.referenciaNormalizada != null && p.esPagoServicio)
+                  _SummaryRow('Referencia validada', val.referenciaNormalizada!),
+                if (val.telefonoNormalizado != null && p.esRecargaTelefonica)
+                  _SummaryRow('Teléfono validado', val.telefonoNormalizado!),
+                if (val.numCuentaEnmascarada != null)
+                  _SummaryRow('Cuenta de cargo', val.numCuentaEnmascarada!),
+                if (val.montoValidado != null)
+                  _SummaryRow(
+                    'Importe del servicio',
+                    formatMxn(val.montoValidado),
+                    bold: true,
+                  ),
+                if (val.comisionEstimada != null && val.comisionEstimada! > 0)
+                  _SummaryRow(
+                    'Comisión estimada',
+                    formatMxn(val.comisionEstimada),
+                  ),
+                const Divider(height: 18, color: Color(0xFFF1F5F9)),
+                if (val.saldoDisponibleActual != null)
+                  _SummaryRow(
+                    'Saldo disponible actual',
+                    formatMxn(val.saldoDisponibleActual),
+                    bold: true,
+                    valueColor: val.saldoSuficiente == false
+                        ? AppColors.danger
+                        : const Color(0xFF047857),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        if (val.saldoSuficiente == false) ...[
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.roseSoft,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.danger.withValues(alpha: 0.35)),
+            ),
+            child: const Text(
+              'Tu saldo disponible no es suficiente para cubrir esta operación.',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF9F1239),
+              ),
+            ),
+          ),
+        ],
+        if (ayudaUrl != null && ayudaUrl.startsWith('http')) ...[
+          const SizedBox(height: 12),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Image.network(
+                ayudaUrl,
+                height: 130,
+                fit: BoxFit.contain,
+                errorBuilder: (_, _, _) => const SizedBox.shrink(),
+              ),
+            ),
+          ),
+        ],
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextFormField(
+                  controller: _correoCtrl,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: const InputDecoration(
+                    labelText: 'Correo para comprobante digital (opcional)',
+                    prefixIcon: Icon(Icons.email_outlined),
+                    hintText: 'cliente@dominio.com',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Row(
+                  children: [
+                    Icon(
+                      Icons.verified_user_outlined,
+                      size: 16,
+                      color: AppColors.secondary,
                     ),
-                    const SizedBox(height: 6),
+                    SizedBox(width: 6),
                     Text(
-                      'Idempotency-Key: $_idempotencyKey',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontFamily: 'monospace',
-                        color: AppColors.mutedText,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    FilledButton.icon(
-                      onPressed: (_submitting || !_confirmadoExplicitamente)
-                          ? null
-                          : _submit,
-                      icon: _submitting
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(Icons.verified_user_outlined),
-                      label: Text(
-                        _submitting
-                            ? 'Procesando con GestoPago...'
-                            : '2. Confirmar y pagar servicio',
+                      'CONFIRMACIÓN DE SEGURIDAD (2FA)',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.7,
+                        color: AppColors.primary,
                       ),
                     ),
                   ],
                 ),
-              ),
+                const SizedBox(height: 10),
+                SegmentedButton<_TwoFaMode>(
+                  segments: [
+                    const ButtonSegment(
+                      value: _TwoFaMode.token,
+                      label: Text('Sesión'),
+                      icon: Icon(Icons.verified_user_outlined, size: 17),
+                    ),
+                    const ButtonSegment(
+                      value: _TwoFaMode.password,
+                      label: Text('Contraseña'),
+                      icon: Icon(Icons.lock_outline, size: 17),
+                    ),
+                    if (ref
+                            .watch(sessionControllerProvider)
+                            .tieneBiometriaFacial &&
+                        ref.watch(faceEmbeddingProvider).isCameraSupported)
+                      const ButtonSegment(
+                        value: _TwoFaMode.rostro,
+                        label: Text('Rostro'),
+                        icon: Icon(Icons.face_retouching_natural, size: 17),
+                      ),
+                    if (_huellaDisponible)
+                      const ButtonSegment(
+                        value: _TwoFaMode.huella,
+                        label: Text('Huella'),
+                        icon: Icon(Icons.fingerprint, size: 17),
+                      ),
+                  ],
+                  selected: {_twoFaMode},
+                  onSelectionChanged: (val) {
+                    setState(() {
+                      _twoFaMode = val.first;
+                      _twoFaPassCtrl.clear();
+                      _validationSummary = null;
+                    });
+                  },
+                ),
+                const SizedBox(height: 10),
+                if (_twoFaMode == _TwoFaMode.token)
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppColors.skySoft,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Text(
+                      'Se autorizará la operación mediante tu sesión segura activa.',
+                      style: TextStyle(fontSize: 12, color: AppColors.sky950),
+                    ),
+                  )
+                else if (_twoFaMode == _TwoFaMode.password)
+                  TextField(
+                    controller: _twoFaPassCtrl,
+                    obscureText: _obscureTwoFaPass,
+                    decoration: InputDecoration(
+                      labelText: 'Contraseña de tu cuenta',
+                      prefixIcon: const Icon(Icons.lock_outline),
+                      suffixIcon: IconButton(
+                        onPressed: () => setState(
+                          () => _obscureTwoFaPass = !_obscureTwoFaPass,
+                        ),
+                        icon: Icon(
+                          _obscureTwoFaPass
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                        ),
+                      ),
+                    ),
+                  )
+                else if (_twoFaMode == _TwoFaMode.rostro)
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppColors.emeraldSoft,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Text(
+                      'Al confirmar el pago se abrirá la cámara frontal para verificar tu rostro registrado.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF065F46),
+                      ),
+                    ),
+                  )
+                else
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppColors.skySoft,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Text(
+                      'Al confirmar el pago se solicitará la huella digital registrada en este dispositivo.',
+                      style: TextStyle(fontSize: 12, color: AppColors.sky950),
+                    ),
+                  ),
+                const SizedBox(height: 12),
+                Material(
+                  color: _confirmadoExplicitamente
+                      ? AppColors.emeraldSoft
+                      : AppColors.background,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(
+                      color: _confirmadoExplicitamente
+                          ? AppColors.accent.withValues(alpha: 0.45)
+                          : AppColors.border,
+                    ),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: CheckboxListTile(
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                    controlAffinity: ListTileControlAffinity.leading,
+                    value: _confirmadoExplicitamente,
+                    onChanged: _submitting
+                        ? null
+                        : (v) => setState(() {
+                              _confirmadoExplicitamente = v ?? false;
+                              _validationSummary = null;
+                            }),
+                    title: const Text(
+                      'Confirmo que verifiqué el proveedor, referencia e importe de esta operación y autorizo el cargo definitivo a mi cuenta.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _submitting
+                            ? null
+                            : () => setState(() {
+                                  _phase = _PagoPhase.captura;
+                                  _validationSummary = null;
+                                  _error = null;
+                                }),
+                        icon: const Icon(Icons.arrow_back_rounded, size: 17),
+                        label: const Text('Modificar'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 2,
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.accent,
+                        ),
+                        onPressed:
+                            (_submitting || val.saldoSuficiente == false)
+                                ? null
+                                : _submit,
+                        icon: _submitting
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.check_circle_outline, size: 18),
+                        label: Text(
+                          _submitting
+                              ? 'Procesando pago...'
+                              : 'Confirmar y pagar',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
-          ],
-        ],
-      ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPhase3CRechazado() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: AppColors.roseSoft,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: AppColors.danger.withValues(alpha: 0.35)),
+          ),
+          child: Column(
+            children: [
+              const Icon(Icons.cancel_outlined, color: AppColors.danger, size: 48),
+              const SizedBox(height: 10),
+              const Text(
+                'Operación Rechazada',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF881337),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _error?.toString() ?? 'No fue posible procesar el pago.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 13, color: Color(0xFF9F1239)),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: const Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.info_outline,
+                color: Color(0xFFD97706),
+                size: 19,
+              ),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'La retención preventiva en tu cuenta fue liberada inmediatamente; no se aplicó ningún cargo a tu saldo disponible.',
+                  style: TextStyle(fontSize: 12.5, color: AppColors.primary),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        FilledButton.icon(
+          onPressed: () {
+            setState(() {
+              _idempotencyKey = _generateKey();
+              _validacionResult = null;
+              _confirmadoExplicitamente = false;
+              _error = null;
+              _phase = _PagoPhase.captura;
+            });
+          },
+          icon: const Icon(Icons.refresh),
+          label: const Text('Revisar datos e intentar de nuevo'),
+        ),
+        const SizedBox(height: 10),
+        OutlinedButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cerrar'),
+        ),
+      ],
     );
   }
 }
 
-class _ServiceLogo extends StatelessWidget {
-  const _ServiceLogo({this.url});
-  final String? url;
+class PagoPhaseProgressBar extends StatelessWidget {
+  const PagoPhaseProgressBar({super.key, required this.activeIndex});
+
+  final int activeIndex;
+
+  static const _labels = [
+    '1. Validación',
+    '2. Autorización',
+    '3. Comprobante',
+  ];
 
   @override
   Widget build(BuildContext context) {
-    final clean = url?.trim();
     return Container(
-      width: 52,
-      height: 52,
-      padding: const EdgeInsets.all(6),
-      decoration: BoxDecoration(
-        color: AppColors.background,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: AppColors.border)),
       ),
-      child: (clean != null && clean.startsWith('http'))
-          ? Image.network(
-              clean,
-              fit: BoxFit.contain,
-              errorBuilder: (_, _, _) => const Icon(
-                Icons.payments_outlined,
-                color: AppColors.secondary,
+      child: Row(
+        children: List.generate(_labels.length, (idx) {
+          final done = idx < activeIndex;
+          final active = idx == activeIndex;
+          return Expanded(
+            child: Container(
+              margin: EdgeInsets.only(right: idx < _labels.length - 1 ? 8 : 0),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+              decoration: BoxDecoration(
+                color: active
+                    ? AppColors.skySoft
+                    : done
+                        ? AppColors.emeraldSoft
+                        : AppColors.background,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: active
+                      ? AppColors.secondary
+                      : done
+                          ? AppColors.accent.withValues(alpha: 0.4)
+                          : AppColors.border,
+                ),
               ),
-            )
-          : const Icon(Icons.payments_outlined, color: AppColors.secondary),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (done) ...[
+                    const Icon(
+                      Icons.check_circle,
+                      size: 13,
+                      color: AppColors.accent,
+                    ),
+                    const SizedBox(width: 4),
+                  ],
+                  Flexible(
+                    child: Text(
+                      _labels[idx],
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: active
+                            ? AppColors.secondary
+                            : done
+                                ? const Color(0xFF047857)
+                                : AppColors.mutedText,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ),
     );
   }
 }
 
 class _SummaryRow extends StatelessWidget {
-  const _SummaryRow(this.label, this.value, {this.bold = false});
+  const _SummaryRow(
+    this.label,
+    this.value, {
+    this.bold = false,
+    this.valueColor,
+  });
+
   final String label;
   final String value;
   final bool bold;
+  final Color? valueColor;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -770,8 +1334,9 @@ class _SummaryRow extends StatelessWidget {
               value,
               textAlign: TextAlign.right,
               style: TextStyle(
-                fontSize: bold ? 15 : 13,
+                fontSize: bold ? 14.5 : 13,
                 fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
+                color: valueColor ?? AppColors.primary,
               ),
             ),
           ),

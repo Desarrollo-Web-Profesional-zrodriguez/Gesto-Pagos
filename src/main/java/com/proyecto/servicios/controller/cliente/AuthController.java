@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.proyecto.servicios.exception.AutenticacionException;
+import com.proyecto.servicios.model.cliente.BiometriaFacialRequest;
 import com.proyecto.servicios.model.cliente.LoginRequest;
 import com.proyecto.servicios.model.cliente.LoginResponse;
 import com.proyecto.servicios.service.cliente.AuthService;
@@ -67,6 +68,25 @@ public class AuthController {
         return ResponseEntity.ok(Map.of(
             "mensaje", "Sesion cerrada exitosamente."
         ));
+    }
+
+    @PostMapping("/biometria-facial")
+    @Operation(summary = "Configurar o desactivar biometria facial", description = "Permite al cliente autenticado registrar, actualizar o eliminar su perfil de reconocimiento facial confirmando su contrasena actual.")
+    public ResponseEntity<Map<String, Object>> configurarBiometriaFacial(
+            @Parameter(description = "Token de sesion en formato 'Bearer <token>'")
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @Valid @RequestBody BiometriaFacialRequest request) {
+        String tokenLimpio = extraerToken(authHeader, null);
+        return ResponseEntity.ok(authService.configurarBiometriaFacial(tokenLimpio, request));
+    }
+
+    @GetMapping("/biometria-facial/estado")
+    @Operation(summary = "Consultar estado de biometria facial", description = "Indica si el titular autenticado cuenta actualmente con reconocimiento facial registrado.")
+    public ResponseEntity<Map<String, Object>> consultarEstadoBiometria(
+            @Parameter(description = "Token de sesion en formato 'Bearer <token>'")
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        String tokenLimpio = extraerToken(authHeader, null);
+        return ResponseEntity.ok(authService.consultarEstadoBiometria(tokenLimpio));
     }
 
     private String extraerToken(String authHeader, String tokenParam) {

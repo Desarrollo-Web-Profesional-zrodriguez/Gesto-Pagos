@@ -7,6 +7,7 @@ import 'package:gestopago_app/core/validation/backend_validators.dart';
 import 'package:gestopago_app/core/widgets/app_feedback.dart';
 import 'package:gestopago_app/features/auth/presentation/session_controller.dart';
 import 'package:gestopago_app/features/pagos/data/pago_repository.dart';
+import 'package:gestopago_app/features/pagos/presentation/pago_screen.dart';
 
 class PagoComprobanteScreen extends ConsumerStatefulWidget {
   const PagoComprobanteScreen({
@@ -39,7 +40,8 @@ class _PagoComprobanteScreenState
     final confirmed = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Reenviar comprobante por correo'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Enviar comprobante por correo'),
         content: Form(
           key: formKey,
           child: TextFormField(
@@ -91,6 +93,7 @@ class _PagoComprobanteScreenState
               referencia: c.referencia,
               montoPagado: c.montoPagado,
               comision: c.comision,
+              pin: c.pin,
               legend: c.legend,
               fechaProveedor: c.fechaProveedor,
               horaLocal: c.horaLocal,
@@ -101,17 +104,21 @@ class _PagoComprobanteScreenState
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
+          behavior: SnackBarBehavior.floating,
           content: Text(
             res.enviado
                 ? res.mensaje
-                : '${res.mensaje} ${res.errorDetalle ?? ''}',
+                : '${res.mensaje} ${res.errorDetalle ?? ''}'.trim(),
           ),
         ),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error al reenviar: $e')),
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text('No fue posible enviar el comprobante: $e'),
+        ),
       );
     } finally {
       if (mounted) setState(() => _resending = false);
@@ -121,157 +128,281 @@ class _PagoComprobanteScreenState
   @override
   Widget build(BuildContext context) {
     final c = widget.comprobante;
+    final refOTel = (c.referencia != null && c.referencia!.isNotEmpty)
+        ? c.referencia!
+        : (c.telefono != null && c.telefono!.isNotEmpty ? c.telefono! : '-');
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Comprobante Digital')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
+      appBar: AppBar(
+        backgroundColor: AppColors.slate950,
+        title: const Text('Comprobante Digital'),
+      ),
+      body: Column(
         children: [
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: AppColors.primary,
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: Column(
+          const PagoPhaseProgressBar(activeIndex: 2),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.all(16),
               children: [
-                const CircleAvatar(
-                  radius: 26,
-                  backgroundColor: AppColors.accent,
-                  child: Icon(Icons.check, color: Colors.white, size: 30),
+                // Comprobante estilo ticket
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(22),
+                    border: Border.all(
+                      color: AppColors.accent.withValues(alpha: 0.4),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.primary.withValues(alpha: 0.06),
+                        blurRadius: 16,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(20),
+                        decoration: const BoxDecoration(
+                          color: AppColors.emeraldSoft,
+                          borderRadius: BorderRadius.vertical(
+                            top: Radius.circular(21),
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            const CircleAvatar(
+                              radius: 26,
+                              backgroundColor: AppColors.accent,
+                              child: Icon(
+                                Icons.check,
+                                color: Colors.white,
+                                size: 30,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            const Text(
+                              '¡Pago Aplicado Exitosamente!',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF065F46),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              c.mensaje.isNotEmpty
+                                  ? c.mensaje
+                                  : '${c.servicio} · ${c.producto}',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Color(0xFF047857),
+                                fontSize: 12.5,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              formatMxn(c.montoPagado),
+                              style: const TextStyle(
+                                color: AppColors.primary,
+                                fontSize: 30,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const _DashedTicketDivider(),
+                      Padding(
+                        padding: const EdgeInsets.all(18),
+                        child: Column(
+                          children: [
+                            _TicketCopyRow(
+                              label: 'Folio UPC',
+                              value: c.upc,
+                              copyLabel: 'Folio UPC',
+                            ),
+                            _TicketCopyRow(
+                              label: 'Autorización',
+                              value: c.numAutorizacion,
+                              copyLabel: 'Número de autorización',
+                            ),
+                            if (c.idTx != null && c.idTx!.isNotEmpty)
+                              _ReceiptRow('ID de operación', c.idTx!),
+                            _ReceiptRow(
+                              'Servicio',
+                              '${c.servicio} · ${c.producto}',
+                            ),
+                            _ReceiptRow('Cuenta de cargo', maskCuenta(c.numCuenta)),
+                            _ReceiptRow('Referencia / Teléfono', refOTel),
+                            if (c.comision != null && c.comision! > 0)
+                              _ReceiptRow('Comisión', formatMxn(c.comision)),
+                            if (c.saldoDisponibleActual != null)
+                              _ReceiptRow(
+                                'Nuevo saldo disponible',
+                                formatMxn(c.saldoDisponibleActual),
+                              ),
+                            if (c.fechaProveedor != null)
+                              _ReceiptRow('Fecha de aplicación', c.fechaProveedor!),
+                            _ReceiptRow(
+                              'Comprobante por correo',
+                              c.emailEnviado == true
+                                  ? 'Enviado correctamente'
+                                  : 'Disponible para reenvío',
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (c.pin != null && c.pin!.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.amberSoft,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                        color: AppColors.warning.withValues(alpha: 0.45),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'PIN Digital',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 14,
+                                color: Color(0xFF78350F),
+                              ),
+                            ),
+                            CopyChip(
+                              value: c.pin!,
+                              copyLabel: 'PIN Digital',
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'Guarda este PIN ahora. Por seguridad, no vuelve a mostrarse en el historial.',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: Color(0xFF92400E),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                if (c.legend != null && c.legend!.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Text(
+                        c.legend!,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.mutedText,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: _resending ? null : _reenviarComprobante,
+                  icon: _resending
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.email_outlined),
+                  label: const Text('Enviar o reenviar comprobante por correo'),
                 ),
                 const SizedBox(height: 10),
-                Text(
-                  c.mensaje,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '${c.servicio} • ${c.producto}',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white70, fontSize: 13),
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  formatMxn(c.montoPagado),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 30,
-                    fontWeight: FontWeight.w800,
-                  ),
+                FilledButton(
+                  onPressed: () =>
+                      Navigator.of(context).popUntil((r) => r.isFirst),
+                  child: const Text('Finalizar y volver al inicio'),
                 ),
               ],
             ),
           ),
-          if (c.pin != null && c.pin!.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            Card(
-              color: const Color(0xFFECFDF5),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'PIN / Folio Canjeable (guárdalo ahora)',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        color: Color(0xFF065F46),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: SelectableText(
-                            c.pin!,
-                            style: const TextStyle(
-                              fontFamily: 'monospace',
-                              fontSize: 20,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          onPressed: () =>
-                              copyToClipboard(context, c.pin!, label: 'PIN'),
-                          icon: const Icon(Icons.copy),
-                        ),
-                      ],
-                    ),
-                    const Text(
-                      'Por seguridad, este PIN no vuelve a mostrarse en el historial.',
-                      style: TextStyle(fontSize: 11.5, color: Color(0xFF047857)),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-          const SizedBox(height: 14),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  _ReceiptRow('Autorización', c.numAutorizacion ?? 'N/A'),
-                  _ReceiptRow('Folio UPC', c.upc),
-                  _ReceiptRow('ID Tx Proveedor', c.idTx ?? 'N/A'),
-                  _ReceiptRow('Cuenta', maskCuenta(c.numCuenta)),
-                  if (c.telefono != null && c.telefono!.isNotEmpty)
-                    _ReceiptRow('Teléfono', c.telefono!),
-                  if (c.referencia != null && c.referencia!.isNotEmpty)
-                    _ReceiptRow('Referencia', c.referencia!),
-                  if (c.comision != null)
-                    _ReceiptRow('Comisión reportada', formatMxn(c.comision)),
-                  if (c.saldoAnterior != null)
-                    _ReceiptRow('Saldo anterior', formatMxn(c.saldoAnterior)),
-                  if (c.saldoDisponibleActual != null)
-                    _ReceiptRow(
-                      'Saldo disponible actual',
-                      formatMxn(c.saldoDisponibleActual),
-                    ),
-                  if (c.fechaProveedor != null)
-                    _ReceiptRow('Fecha proveedor', c.fechaProveedor!),
-                  _ReceiptRow(
-                    'Correo Brevo',
-                    c.emailEnviado == true ? 'Enviado' : 'No enviado / pendiente',
-                  ),
-                ],
-              ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DashedTicketDivider extends StatelessWidget {
+  const _DashedTicketDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (_, constraints) {
+        final count = (constraints.maxWidth / 10).floor().clamp(10, 60);
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: List.generate(
+            count,
+            (_) => Container(
+              width: 5,
+              height: 1.5,
+              color: AppColors.accent.withValues(alpha: 0.35),
             ),
           ),
-          if (c.legend != null && c.legend!.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(
-                  c.legend!,
-                  style: const TextStyle(fontSize: 12, color: AppColors.mutedText),
-                ),
-              ),
+        );
+      },
+    );
+  }
+}
+
+class _TicketCopyRow extends StatelessWidget {
+  const _TicketCopyRow({
+    required this.label,
+    required this.value,
+    required this.copyLabel,
+  });
+
+  final String label;
+  final String? value;
+  final String copyLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 2,
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 13, color: AppColors.mutedText),
             ),
-          ],
-          const SizedBox(height: 16),
-          OutlinedButton.icon(
-            onPressed: _resending ? null : _reenviarComprobante,
-            icon: _resending
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.email_outlined),
-            label: const Text('Enviar o reenviar comprobante por correo'),
           ),
-          const SizedBox(height: 10),
-          FilledButton(
-            onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
-            child: const Text('Volver al inicio'),
+          Expanded(
+            flex: 3,
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: (value != null && value!.trim().isNotEmpty)
+                  ? CopyChip(value: value, copyLabel: copyLabel)
+                  : const Text(
+                      'No disponible',
+                      style: TextStyle(fontSize: 13, color: AppColors.mutedText),
+                    ),
+            ),
           ),
         ],
       ),
@@ -331,9 +462,12 @@ class _PagoConciliacionScreenState
       setState(() => _estatus = res);
       if (res.definitivo || res.estatus == 'REVISION_MANUAL') {
         _pollingTimer?.cancel();
-        await ref
-            .read(sessionControllerProvider.notifier)
-            .refrescarSaldoActual();
+        try {
+          await ref
+              .read(sessionControllerProvider.notifier)
+              .refrescarSaldoActual();
+        } catch (_) {}
+        ref.read(historyRefreshSignalProvider.notifier).bump();
       }
     } catch (e) {
       if (mounted) setState(() => _error = e);
@@ -345,9 +479,9 @@ class _PagoConciliacionScreenState
   @override
   Widget build(BuildContext context) {
     final est = _estatus;
-    final estadoLabel = est?.estatus ?? 'PENDIENTE_CONCILIACION';
-    final isSuccess = estadoLabel == 'EXITOSA';
-    final isRejected = estadoLabel == 'RECHAZADA';
+    final estadoRaw = est?.estatus ?? 'PENDIENTE_CONCILIACION';
+    final isSuccess = estadoRaw == 'EXITOSA';
+    final isRejected = estadoRaw == 'RECHAZADA';
 
     final color = isSuccess
         ? AppColors.accent
@@ -356,7 +490,10 @@ class _PagoConciliacionScreenState
             : AppColors.warning;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Seguimiento de Pago (UPC)')),
+      appBar: AppBar(
+        backgroundColor: AppColors.slate950,
+        title: const Text('Seguimiento de Operación'),
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -367,23 +504,16 @@ class _PagoConciliacionScreenState
                 children: [
                   Icon(
                     isSuccess
-                        ? Icons.check_circle
+                        ? Icons.check_circle_outline
                         : isRejected
-                            ? Icons.cancel
+                            ? Icons.cancel_outlined
                             : Icons.hourglass_top_rounded,
                     color: color,
                     size: 54,
                   ),
                   const SizedBox(height: 12),
-                  Text(
-                    estadoLabel,
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800,
-                      color: color,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
+                  StatusBadge(estatus: estadoRaw),
+                  const SizedBox(height: 10),
                   Text(
                     est?.mensaje ?? widget.mensajeInicial,
                     textAlign: TextAlign.center,
@@ -391,43 +521,53 @@ class _PagoConciliacionScreenState
                   ),
                   const SizedBox(height: 16),
                   Container(
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
                     decoration: BoxDecoration(
                       color: AppColors.background,
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(12),
                     ),
                     child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          'UPC: ${widget.upc}',
-                          style: const TextStyle(
-                            fontFamily: 'monospace',
-                            fontWeight: FontWeight.w700,
+                        const Text(
+                          'Folio UPC',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            color: AppColors.mutedText,
                           ),
                         ),
-                        IconButton(
-                          visualDensity: VisualDensity.compact,
-                          onPressed: () => copyToClipboard(
-                            context,
-                            widget.upc,
-                            label: 'UPC',
-                          ),
-                          icon: const Icon(Icons.copy, size: 18),
-                        ),
+                        CopyChip(value: widget.upc, copyLabel: 'Folio UPC'),
                       ],
                     ),
                   ),
                   if (est?.numAutorizacion != null) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Autorización: ${est!.numAutorizacion}',
-                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    const SizedBox(height: 10),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Autorización',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            color: AppColors.mutedText,
+                          ),
+                        ),
+                        CopyChip(
+                          value: est!.numAutorizacion,
+                          copyLabel: 'Autorización',
+                        ),
+                      ],
                     ),
                   ],
                   if (est?.monto != null) ...[
-                    const SizedBox(height: 4),
-                    Text('Monto: ${formatMxn(est!.monto)}'),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Importe: ${formatMxn(est!.monto)}',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
                   ],
                 ],
               ),
@@ -437,12 +577,15 @@ class _PagoConciliacionScreenState
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: AppColors.warning.withValues(alpha: 0.1),
+              color: AppColors.amberSoft,
               borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: AppColors.warning.withValues(alpha: 0.4),
+              ),
             ),
             child: const Text(
               'Importante: No reintentes el pago mientras el estatus no sea definitivo para evitar cargos duplicados.',
-              style: TextStyle(fontSize: 12.5),
+              style: TextStyle(fontSize: 12.5, color: Color(0xFF78350F)),
             ),
           ),
           if (_error != null) ...[
@@ -459,7 +602,7 @@ class _PagoConciliacionScreenState
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.refresh),
-            label: const Text('Consultar estatus ahora'),
+            label: const Text('Consultar estatus en vivo'),
           ),
           const SizedBox(height: 10),
           FilledButton(
@@ -519,6 +662,7 @@ class _TransaccionDetalleScreenState
     final confirmed = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Enviar comprobante por correo'),
         content: Form(
           key: formKey,
@@ -559,14 +703,15 @@ class _TransaccionDetalleScreenState
             ComprobanteEmailDto(
               destinatarioEmail: confirmed,
               destinatarioNombre: session.loginResponse?.nombreCliente,
-              numAutorizacion: _estatusVivo?.numAutorizacion ?? tx.numAutorizacion,
+              numAutorizacion:
+                  _estatusVivo?.numAutorizacion ?? tx.numAutorizacion,
               idTx: tx.idTxGestoPago,
               upc: tx.upc,
               numCuenta: tx.numeroCuenta,
               idServicio: tx.idServicio,
-              servicio: tx.servicio ?? 'Servicio #${tx.idServicio}',
+              servicio: tx.servicio ?? 'Pago de servicio',
               idProducto: tx.idProducto,
-              producto: tx.producto ?? 'Producto #${tx.idProducto}',
+              producto: tx.producto ?? 'Operación digital',
               telefono: tx.telefono,
               referencia: tx.referencia,
               montoPagado: tx.monto,
@@ -574,22 +719,27 @@ class _TransaccionDetalleScreenState
               legend: tx.legend,
               horaLocal: tx.horaLocal,
               logoUrl: tx.urlLogo,
+              tipoFront: tx.referencia.isNotEmpty ? 2 : 1,
             ),
           );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
+          behavior: SnackBarBehavior.floating,
           content: Text(
             res.enviado
                 ? res.mensaje
-                : '${res.mensaje} ${res.errorDetalle ?? ''}',
+                : '${res.mensaje} ${res.errorDetalle ?? ''}'.trim(),
           ),
         ),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error al enviar comprobante: $e')),
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text('No fue posible enviar el comprobante: $e'),
+        ),
       );
     } finally {
       if (mounted) setState(() => _resending = false);
@@ -602,17 +752,12 @@ class _TransaccionDetalleScreenState
     final estatusActual = _estatusVivo?.estatus ?? tx.estatus;
     final numAutActual = _estatusVivo?.numAutorizacion ?? tx.numAutorizacion;
     final isSuccess = estatusActual == 'EXITOSA';
-    final isRejected = estatusActual == 'RECHAZADA';
-    final statusColor = isSuccess
-        ? AppColors.accent
-        : isRejected
-            ? AppColors.danger
-            : AppColors.warning;
-
-    final logoClean = tx.urlLogo?.trim();
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Detalle de Transacción')),
+      appBar: AppBar(
+        backgroundColor: AppColors.slate950,
+        title: const Text('Detalle de Transacción'),
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -621,38 +766,19 @@ class _TransaccionDetalleScreenState
               padding: const EdgeInsets.all(18),
               child: Column(
                 children: [
-                  Container(
-                    width: 60,
-                    height: 60,
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
-                      color: AppColors.background,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: (logoClean != null && logoClean.startsWith('http'))
-                        ? Image.network(
-                            logoClean,
-                            fit: BoxFit.contain,
-                            errorBuilder: (_, _, _) => const Icon(
-                              Icons.payments_outlined,
-                              color: AppColors.secondary,
-                              size: 30,
-                            ),
-                          )
-                        : const Icon(
-                            Icons.payments_outlined,
-                            color: AppColors.secondary,
-                            size: 30,
-                          ),
+                  ServiceLogo(
+                    urlLogo: tx.urlLogo,
+                    tipoFront: tx.referencia.isNotEmpty ? 2 : 1,
+                    size: 58,
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    tx.servicio ?? 'Servicio #${tx.idServicio}',
+                    tx.servicio ?? 'Pago de servicio',
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w800,
+                      color: AppColors.primary,
                     ),
                   ),
                   if (tx.producto != null && tx.producto!.isNotEmpty)
@@ -674,24 +800,7 @@ class _TransaccionDetalleScreenState
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: statusColor.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      estatusActual,
-                      style: TextStyle(
-                        color: statusColor,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 12.5,
-                      ),
-                    ),
-                  ),
+                  StatusBadge(estatus: estatusActual),
                 ],
               ),
             ),
@@ -706,28 +815,38 @@ class _TransaccionDetalleScreenState
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
-                  _ReceiptRow('Folio UPC', tx.upc),
-                  if (numAutActual != null && numAutActual.isNotEmpty)
-                    _ReceiptRow('Autorización', numAutActual),
+                  _TicketCopyRow(
+                    label: 'Folio UPC',
+                    value: tx.upc,
+                    copyLabel: 'Folio UPC',
+                  ),
+                  _TicketCopyRow(
+                    label: 'Autorización',
+                    value: numAutActual,
+                    copyLabel: 'Autorización',
+                  ),
                   if (tx.idTxGestoPago != null && tx.idTxGestoPago!.isNotEmpty)
-                    _ReceiptRow('ID Tx GestoPago', tx.idTxGestoPago!),
+                    _ReceiptRow('ID de operación', tx.idTxGestoPago!),
                   _ReceiptRow('Cuenta', maskCuenta(tx.numeroCuenta)),
-                  _ReceiptRow('Referencia', tx.referencia),
-                  if (tx.telefono.isNotEmpty)
-                    _ReceiptRow('Teléfono', tx.telefono),
+                  _TicketCopyRow(
+                    label: 'Referencia / Teléfono',
+                    value: tx.referencia.isNotEmpty ? tx.referencia : tx.telefono,
+                    copyLabel: 'Referencia',
+                  ),
                   if (tx.comision != null)
                     _ReceiptRow('Comisión', formatMxn(tx.comision)),
                   _ReceiptRow(
                     'Fecha de operación',
-                    tx.fechaCreacion ?? tx.horaLocal ?? 'N/A',
+                    formatFecha(tx.fechaCreacion ?? tx.horaLocal),
                   ),
                   if (tx.fechaActualizacion != null)
-                    _ReceiptRow('Última actualización', tx.fechaActualizacion!),
-                  if (tx.codigoRespuesta != null)
-                    _ReceiptRow('Código proveedor', tx.codigoRespuesta!),
+                    _ReceiptRow(
+                      'Última actualización',
+                      formatFecha(tx.fechaActualizacion),
+                    ),
                   _ReceiptRow(
-                    'Mensaje',
-                    _estatusVivo?.mensaje ?? tx.mensajeRespuesta ?? 'Sin detalle',
+                    'Detalle',
+                    _estatusVivo?.mensaje ?? tx.mensajeRespuesta ?? 'Operación registrada',
                   ),
                 ],
               ),
@@ -758,7 +877,7 @@ class _TransaccionDetalleScreenState
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.sync),
-            label: const Text('Actualizar estatus en línea (GET /pagos/estatus)'),
+            label: const Text('Verificar estatus actual en vivo'),
           ),
           if (isSuccess) ...[
             const SizedBox(height: 10),
@@ -807,7 +926,11 @@ class _ReceiptRow extends StatelessWidget {
             child: Text(
               value,
               textAlign: TextAlign.right,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.primary,
+              ),
             ),
           ),
         ],

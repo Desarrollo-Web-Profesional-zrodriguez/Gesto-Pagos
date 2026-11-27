@@ -14,6 +14,7 @@ import static org.mockito.Mockito.when;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +29,8 @@ import com.proyecto.servicios.entity.cliente.Cliente;
 import com.proyecto.servicios.entity.cliente.SesionLogin;
 import com.proyecto.servicios.entity.cliente.UsuarioLogin;
 import com.proyecto.servicios.exception.AutenticacionException;
+import com.proyecto.servicios.exception.ReglaNegocioException;
+import com.proyecto.servicios.model.cliente.BiometriaFacialRequest;
 import com.proyecto.servicios.model.cliente.LoginRequest;
 import com.proyecto.servicios.model.cliente.LoginResponse;
 import com.proyecto.servicios.repositorys.cliente.SesionLoginRepository;
@@ -393,5 +396,160 @@ class AuthServiceImplTest {
         authService.logout("token-fantasma");
 
         verify(sesionLoginRepository, never()).save(any(SesionLogin.class));
+    }
+
+    @Test
+    @DisplayName("configurarBiometriaFacial: registra vector valido verificando contrasena actual")
+    void testConfigurarBiometriaFacial_ActivarExitoso() {
+        LocalDateTime ahora = LocalDateTime.now().minusMinutes(1);
+        UsuarioLogin usuario = UsuarioLogin.builder()
+                .idUsuario(1L)
+                .username("cliente@banco.com")
+                .passwordHash(PASSWORD_HASH)
+                .activo(true)
+                .build();
+        SesionLogin sesion = SesionLogin.builder()
+                .tokenSesion("tok-bio-1")
+                .usuario(usuario)
+                .activa(true)
+                .ultimoAcceso(ahora)
+                .fechaInicio(ahora)
+                .fechaExpiracion(ahora.plusMinutes(5))
+                .build();
+
+        when(sesionLoginRepository.findByTokenSesion("tok-bio-1")).thenReturn(Optional.of(sesion));
+
+        BiometriaFacialRequest req = BiometriaFacialRequest.builder()
+                .passwordActual(PASSWORD_VALIDO)
+                .biometricoFacialEmbedding("[0.452, -0.312, 0.835, 0.041]")
+                .eliminar(false)
+                .build();
+
+        Map<String, Object> res = authService.configurarBiometriaFacial("tok-bio-1", req);
+
+        assertEquals(true, res.get("biometriaFacialActiva"));
+        assertEquals("[0.452, -0.312, 0.835, 0.041]", usuario.getBiometricoFacialEmbedding());
+        verify(usuarioLoginRepository).save(usuario);
+    }
+
+    @Test
+    @DisplayName("configurarBiometriaFacial: desactiva y limpia vector cuando eliminar=true")
+    void testConfigurarBiometriaFacial_EliminarExitoso() {
+        LocalDateTime ahora = LocalDateTime.now().minusMinutes(1);
+        UsuarioLogin usuario = UsuarioLogin.builder()
+                .idUsuario(1L)
+                .username("cliente@banco.com")
+                .passwordHash(PASSWORD_HASH)
+                .biometricoFacialEmbedding(EMBEDDING_VALIDO)
+                .activo(true)
+                .build();
+        SesionLogin sesion = SesionLogin.builder()
+                .tokenSesion("tok-bio-2")
+                .usuario(usuario)
+                .activa(true)
+                .ultimoAcceso(ahora)
+                .fechaInicio(ahora)
+                .fechaExpiracion(ahora.plusMinutes(5))
+                .build();
+
+        when(sesionLoginRepository.findByTokenSesion("tok-bio-2")).thenReturn(Optional.of(sesion));
+
+        BiometriaFacialRequest req = BiometriaFacialRequest.builder()
+                .passwordActual(PASSWORD_VALIDO)
+                .eliminar(true)
+                .build();
+
+        Map<String, Object> res = authService.configurarBiometriaFacial("tok-bio-2", req);
+
+        assertEquals(false, res.get("biometriaFacialActiva"));
+        assertNull(usuario.getBiometricoFacialEmbedding());
+        verify(usuarioLoginRepository).save(usuario);
+    }
+
+    @Test
+    @DisplayName("configurarBiometriaFacial: contrasena incorrecta lanza AutenticacionException")
+    void testConfigurarBiometriaFacial_PasswordIncorrecto_LanzaExcepcion() {
+        LocalDateTime ahora = LocalDateTime.now().minusMinutes(1);
+        UsuarioLogin usuario = UsuarioLogin.builder()
+                .idUsuario(1L)
+                .username("cliente@banco.com")
+                .passwordHash(PASSWORD_HASH)
+                .activo(true)
+                .build();
+        SesionLogin sesion = SesionLogin.builder()
+                .tokenSesion("tok-bio-3")
+                .usuario(usuario)
+                .activa(true)
+                .ultimoAcceso(ahora)
+                .fechaInicio(ahora)
+                .fechaExpiracion(ahora.plusMinutes(5))
+                .build();
+
+        when(sesionLoginRepository.findByTokenSesion("tok-bio-3")).thenReturn(Optional.of(sesion));
+
+        BiometriaFacialRequest req = BiometriaFacialRequest.builder()
+                .passwordActual("Incorrecta999*")
+                .biometricoFacialEmbedding(EMBEDDING_VALIDO)
+                .build();
+
+        assertThrows(AutenticacionException.class,
+                () -> authService.configurarBiometriaFacial("tok-bio-3", req));
+        verify(usuarioLoginRepository, never()).save(any(UsuarioLogin.class));
+    }
+
+    @Test
+    @DisplayName("configurarBiometriaFacial: vector invalido o nulo lanza ReglaNegocioException")
+    void testConfigurarBiometriaFacial_VectorInvalido_LanzaExcepcion() {
+        LocalDateTime ahora = LocalDateTime.now().minusMinutes(1);
+        UsuarioLogin usuario = UsuarioLogin.builder()
+                .idUsuario(1L)
+                .username("cliente@banco.com")
+                .passwordHash(PASSWORD_HASH)
+                .activo(true)
+                .build();
+        SesionLogin sesion = SesionLogin.builder()
+                .tokenSesion("tok-bio-4")
+                .usuario(usuario)
+                .activa(true)
+                .ultimoAcceso(ahora)
+                .fechaInicio(ahora)
+                .fechaExpiracion(ahora.plusMinutes(5))
+                .build();
+
+        when(sesionLoginRepository.findByTokenSesion("tok-bio-4")).thenReturn(Optional.of(sesion));
+
+        BiometriaFacialRequest req = BiometriaFacialRequest.builder()
+                .passwordActual(PASSWORD_VALIDO)
+                .biometricoFacialEmbedding("[0.0, 0.0, 0.0]")
+                .build();
+
+        assertThrows(ReglaNegocioException.class,
+                () -> authService.configurarBiometriaFacial("tok-bio-4", req));
+    }
+
+    @Test
+    @DisplayName("consultarEstadoBiometria: indica correctamente si el usuario tiene biometria registrada")
+    void testConsultarEstadoBiometria_Exitoso() {
+        LocalDateTime ahora = LocalDateTime.now().minusMinutes(1);
+        UsuarioLogin usuario = UsuarioLogin.builder()
+                .idUsuario(1L)
+                .username("cliente@banco.com")
+                .biometricoFacialEmbedding(EMBEDDING_VALIDO)
+                .activo(true)
+                .build();
+        SesionLogin sesion = SesionLogin.builder()
+                .tokenSesion("tok-bio-5")
+                .usuario(usuario)
+                .activa(true)
+                .ultimoAcceso(ahora)
+                .fechaInicio(ahora)
+                .fechaExpiracion(ahora.plusMinutes(5))
+                .build();
+
+        when(sesionLoginRepository.findByTokenSesion("tok-bio-5")).thenReturn(Optional.of(sesion));
+
+        Map<String, Object> estado = authService.consultarEstadoBiometria("tok-bio-5");
+        assertEquals(true, estado.get("biometriaFacialActiva"));
+        assertEquals("cliente@banco.com", estado.get("username"));
     }
 }

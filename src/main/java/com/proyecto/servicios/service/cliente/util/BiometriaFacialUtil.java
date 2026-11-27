@@ -52,6 +52,35 @@ public final class BiometriaFacialUtil {
         return productoPunto / (Math.sqrt(normaA) * Math.sqrt(normaB));
     }
 
+    /**
+     * Verifica que un vector facial tenga estructura numérica válida y norma no nula.
+     */
+    public static boolean esEmbeddingValido(String embedding) {
+        if (embedding == null) {
+            return false;
+        }
+        String trimmed = embedding.trim();
+        if (trimmed.isEmpty() || trimmed.length() > 2048) {
+            return false;
+        }
+        try {
+            double[] vector = parsearVector(trimmed);
+            if (vector.length < 3 || vector.length > 512) {
+                return false;
+            }
+            double norma = 0.0;
+            for (double v : vector) {
+                if (!Double.isFinite(v)) {
+                    return false;
+                }
+                norma += v * v;
+            }
+            return Math.sqrt(norma) > 1e-6;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     private static double[] parsearVector(String vectorStr) {
         // Limpia corchetes en formato JSON "[0.12, -0.34, ...]"
         String limpio = vectorStr.replaceAll("[\\[\\]\\s]", "");

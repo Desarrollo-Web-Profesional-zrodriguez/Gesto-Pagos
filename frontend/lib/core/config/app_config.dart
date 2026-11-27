@@ -1,11 +1,10 @@
-import 'dart:io' show Platform;
-
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-/// Configuración de entornos y URLs base del backend Spring Boot.
+/// Configuración de entorno y URL base del servicio GestoPagos.
 class AppEnvironment {
   AppEnvironment._();
+
+  static const String productionBaseUrl = 'https://gesto-pagos-api.onrender.com';
 
   static const String envBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
@@ -16,23 +15,8 @@ class AppEnvironment {
     if (envBaseUrl.trim().isNotEmpty) {
       return _normalizeBaseUrl(envBaseUrl);
     }
-    if (!kIsWeb && Platform.isAndroid) {
-      // Dirección estándar del host desde el emulador Android.
-      return 'http://10.0.2.2:8080';
-    }
-    return 'http://localhost:8080';
+    return productionBaseUrl;
   }
-
-  static List<BackendPreset> get presets => [
-        const BackendPreset(
-          label: 'Emulador Android (10.0.2.2:8080)',
-          url: 'http://10.0.2.2:8080',
-        ),
-        const BackendPreset(
-          label: 'Localhost / Simulador iOS (localhost:8080)',
-          url: 'http://localhost:8080',
-        ),
-      ];
 
   static String normalize(String raw) => _normalizeBaseUrl(raw);
 
@@ -43,13 +27,6 @@ class AppEnvironment {
     }
     return trimmed;
   }
-}
-
-class BackendPreset {
-  const BackendPreset({required this.label, required this.url});
-
-  final String label;
-  final String url;
 }
 
 class ApiBaseUrlNotifier extends Notifier<String> {
