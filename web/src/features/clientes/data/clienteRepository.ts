@@ -43,7 +43,44 @@ function buildRegistroPayload(input: ClienteRegistroInput): Record<string, unkno
   };
 }
 
+export interface SolicitarOtpOnboardingInput {
+  correoElectronico: string;
+  nombre?: string;
+  curp?: string;
+  rfc?: string;
+}
+
+export interface SolicitarOtpOnboardingResponse {
+  enviado: boolean;
+  emailEnmascarado: string;
+  expiraEnSegundos: number;
+  mensaje: string;
+}
+
 export const clienteRepository = {
+  async solicitarOtpOnboarding(
+    input: SolicitarOtpOnboardingInput
+  ): Promise<SolicitarOtpOnboardingResponse> {
+    const res = await apiClient.post<SolicitarOtpOnboardingResponse>(
+      '/auth/onboarding/enviar-otp',
+      {
+        correoElectronico: input.correoElectronico.trim().toLowerCase(),
+        nombre: cleanOptionalText(input.nombre),
+        curp: cleanOptionalText(input.curp)?.toUpperCase(),
+        rfc: cleanOptionalText(input.rfc)?.toUpperCase(),
+      }
+    );
+    return res.data;
+  },
+
+  async registrarConOtp(codigoOtp: string, input: ClienteRegistroInput): Promise<ClienteDto> {
+    const res = await apiClient.post<ClienteDto>('/auth/onboarding/registrar-verificado', {
+      codigoOtp: codigoOtp.trim(),
+      registro: buildRegistroPayload(input),
+    });
+    return res.data;
+  },
+
   async registrar(input: ClienteRegistroInput): Promise<ClienteDto> {
     const res = await apiClient.post<ClienteDto>('/clientes', buildRegistroPayload(input));
     return res.data;

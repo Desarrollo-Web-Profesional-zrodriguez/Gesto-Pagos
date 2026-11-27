@@ -146,7 +146,7 @@ class HttpClient {
       }
       throw new ApiException({
         mensaje:
-          'No fue posible conectar con el servidor backend. Verifica que esté encendido y accesible.',
+          'No fue posible conectar con el servicio en este momento. Verifica tu conexión e intenta nuevamente.',
       });
     } finally {
       window.clearTimeout(timer);

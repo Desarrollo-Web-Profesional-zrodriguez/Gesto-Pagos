@@ -140,7 +140,16 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   useEffect(() => {
     apiClient.configure({
-      tokenProvider: () => sesionRef.current?.tokenSesion ?? null,
+      tokenProvider: () => {
+        if (sesionRef.current?.tokenSesion) {
+          return sesionRef.current.tokenSesion;
+        }
+        try {
+          return window.sessionStorage.getItem('gestopago_backoffice_token');
+        } catch {
+          return null;
+        }
+      },
       onUnauthorizedExpired: () => {
         if (sesionRef.current) {
           clearState('Tu sesión ha expirado (límite de 5 minutos de inactividad). Inicia sesión nuevamente.');
