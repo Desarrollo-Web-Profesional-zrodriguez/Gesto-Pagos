@@ -44,6 +44,7 @@ public class ClienteResponse {
     private String empresa;
     private Double ingresoMensual;
     private Boolean activo;
+    private Boolean biometriaFacialActiva;
     private LocalDateTime fechaCreacion;
     private LocalDateTime fechaModificacion;
 

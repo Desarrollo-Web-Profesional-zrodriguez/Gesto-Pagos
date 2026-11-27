@@ -1,5 +1,8 @@
 package com.proyecto.servicios.service.cliente;
 
+import java.util.Map;
+
+import com.proyecto.servicios.model.cliente.BiometriaFacialRequest;
 import com.proyecto.servicios.model.cliente.LoginRequest;
 import com.proyecto.servicios.model.cliente.LoginResponse;
 
@@ -13,4 +16,10 @@ public interface AuthService {
 
     // Cierre de sesión (baja lógica de la sesión)
     void logout(String tokenSesion);
+
+    // Registrar, actualizar o desactivar biometría facial desde el perfil autenticado
+    Map<String, Object> configurarBiometriaFacial(String tokenSesion, BiometriaFacialRequest request);
+
+    // Consultar si el usuario autenticado cuenta con biometría facial registrada
+    Map<String, Object> consultarEstadoBiometria(String tokenSesion);
 }

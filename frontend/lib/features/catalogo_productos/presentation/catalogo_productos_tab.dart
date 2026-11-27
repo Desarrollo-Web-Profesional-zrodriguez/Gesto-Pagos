@@ -20,7 +20,7 @@ class CatalogoProductosTab extends ConsumerStatefulWidget {
 
 class _CatalogoProductosTabState extends ConsumerState<CatalogoProductosTab> {
   final _searchCtrl = TextEditingController();
-  int? _selectedCategory;
+  int? _selectedCategory; // null = Todas las categorías
 
   @override
   void dispose() {
@@ -31,13 +31,23 @@ class _CatalogoProductosTabState extends ConsumerState<CatalogoProductosTab> {
   String _labelCategoria(int tipoFront) {
     switch (tipoFront) {
       case 1:
-        return 'Recargas y Pines (1)';
+        return 'Recargas y Pines';
       case 2:
-        return 'Pago de Servicios (2)';
+        return 'Pago de Servicios';
+      case 4:
+        return 'Consulta de Referencia';
+      case 5:
+        return 'Pagos por Referencia';
+      case 30:
+        return 'Depósitos';
+      case 31:
+        return 'Retiros';
+      case 40:
+        return 'Transferencias';
       case 0:
-        return 'Otros (0)';
+        return 'Otros';
       default:
-        return 'Categoría $tipoFront';
+        return 'Servicios';
     }
   }
 
@@ -55,7 +65,7 @@ class _CatalogoProductosTabState extends ConsumerState<CatalogoProductosTab> {
         ),
       ),
       data: (catalogo) {
-        final keys = catalogo.categorias.keys.toList();
+        final keys = catalogo.categorias.keys.toList()..sort();
         if (keys.isEmpty) {
           return Center(
             child: Padding(
@@ -69,7 +79,11 @@ class _CatalogoProductosTabState extends ConsumerState<CatalogoProductosTab> {
                     color: AppColors.mutedText,
                   ),
                   const SizedBox(height: 12),
-                  Text(catalogo.message, textAlign: TextAlign.center),
+                  const Text(
+                    'No hay servicios disponibles por el momento.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
                   const SizedBox(height: 14),
                   FilledButton(
                     onPressed: () => ref.invalidate(catalogoProductosProvider),
@@ -81,50 +95,57 @@ class _CatalogoProductosTabState extends ConsumerState<CatalogoProductosTab> {
           );
         }
 
-        final activeKey = (_selectedCategory != null &&
-                catalogo.categorias.containsKey(_selectedCategory))
-            ? _selectedCategory!
-            : keys.first;
-
         final query = _searchCtrl.text.trim().toLowerCase();
-        final products = (catalogo.categorias[activeKey] ?? const [])
-            .where((p) {
-              if (query.isEmpty) return true;
-              return p.servicio.toLowerCase().contains(query) ||
+        final List<({int categoria, ProductItemDto item})> products = [];
+        for (final k in keys) {
+          if (_selectedCategory != null && _selectedCategory != k) continue;
+          final catName = _labelCategoria(k).toLowerCase();
+          for (final p in catalogo.categorias[k] ?? const <ProductItemDto>[]) {
+            if (query.isNotEmpty) {
+              final match = p.servicio.toLowerCase().contains(query) ||
                   p.producto.toLowerCase().contains(query) ||
-                  p.idServicio.toString().contains(query) ||
-                  p.idProducto.toString().contains(query);
-            })
-            .toList();
+                  (p.legend ?? '').toLowerCase().contains(query) ||
+                  catName.contains(query);
+              if (!match) continue;
+            }
+            products.add((categoria: k, item: p));
+          }
+        }
+
+        final hayFiltros = query.isNotEmpty || _selectedCategory != null;
 
         return Column(
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            Container(
+              color: Colors.white,
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
                       Expanded(
-                        child: TextField(
-                          controller: _searchCtrl,
-                          onChanged: (_) => setState(() {}),
-                          decoration: InputDecoration(
-                            hintText: 'Buscar servicio o producto...',
-                            prefixIcon: const Icon(Icons.search),
-                            suffixIcon: _searchCtrl.text.isNotEmpty
-                                ? IconButton(
-                                    onPressed: () {
-                                      _searchCtrl.clear();
-                                      setState(() {});
-                                    },
-                                    icon: const Icon(Icons.clear),
-                                  )
-                                : null,
-                          ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Catálogo de Servicios',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                            Text(
+                              '${catalogo.totalProductos} servicios y recargas disponibles',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppColors.mutedText,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(width: 8),
                       IconButton.filledTonal(
                         tooltip: 'Actualizar catálogo',
                         onPressed: () =>
@@ -134,58 +155,139 @@ class _CatalogoProductosTabState extends ConsumerState<CatalogoProductosTab> {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Chip(
-                        avatar: const Icon(Icons.storage, size: 16),
-                        label: Text(
-                          '${catalogo.origen} • ${catalogo.totalProductos} productos',
-                          style: const TextStyle(fontSize: 11.5),
-                        ),
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  SizedBox(
-                    height: 38,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: keys.length,
-                      separatorBuilder: (_, _) => const SizedBox(width: 8),
-                      itemBuilder: (context, index) {
-                        final k = keys[index];
-                        final count = catalogo.categorias[k]?.length ?? 0;
-                        return ChoiceChip(
-                          label: Text('${_labelCategoria(k)} ($count)'),
-                          selected: activeKey == k,
-                          onSelected: (_) =>
-                              setState(() => _selectedCategory = k),
-                        );
-                      },
+                  TextField(
+                    controller: _searchCtrl,
+                    onChanged: (_) => setState(() {}),
+                    decoration: InputDecoration(
+                      hintText: 'Buscar CFE, Telcel, Netflix, agua o internet...',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: _searchCtrl.text.isNotEmpty
+                          ? IconButton(
+                              tooltip: 'Limpiar búsqueda',
+                              onPressed: () {
+                                _searchCtrl.clear();
+                                setState(() {});
+                              },
+                              icon: const Icon(Icons.clear),
+                            )
+                          : null,
                     ),
                   ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    height: 38,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: [
+                        ChoiceChip(
+                          label: Text('Todas (${catalogo.totalProductos})'),
+                          selected: _selectedCategory == null,
+                          onSelected: (_) =>
+                              setState(() => _selectedCategory = null),
+                        ),
+                        ...keys.map((k) {
+                          final count = catalogo.categorias[k]?.length ?? 0;
+                          return Padding(
+                            padding: const EdgeInsets.only(left: 8),
+                            child: ChoiceChip(
+                              label: Text('${_labelCategoria(k)} ($count)'),
+                              selected: _selectedCategory == k,
+                              onSelected: (_) =>
+                                  setState(() => _selectedCategory = k),
+                            ),
+                          );
+                        }),
+                      ],
+                    ),
+                  ),
+                  if (hayFiltros) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          '${products.length} resultado${products.length == 1 ? '' : 's'}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.mutedText,
+                          ),
+                        ),
+                        TextButton.icon(
+                          style: TextButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          onPressed: () {
+                            _searchCtrl.clear();
+                            setState(() => _selectedCategory = null);
+                          },
+                          icon: const Icon(Icons.close, size: 15),
+                          label: const Text('Restablecer filtros'),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),
+            const Divider(height: 1, color: AppColors.border),
             Expanded(
               child: products.isEmpty
-                  ? const Center(
-                      child: Text(
-                        'No hay productos que coincidan con tu búsqueda.',
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.search_off_outlined,
+                              size: 46,
+                              color: AppColors.mutedText,
+                            ),
+                            const SizedBox(height: 10),
+                            const Text(
+                              'No encontramos servicios con ese criterio',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            const Text(
+                              'Prueba buscando por nombre comercial o selecciona otra categoría.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                color: AppColors.mutedText,
+                              ),
+                            ),
+                            if (hayFiltros) ...[
+                              const SizedBox(height: 14),
+                              OutlinedButton(
+                                onPressed: () {
+                                  _searchCtrl.clear();
+                                  setState(() => _selectedCategory = null);
+                                },
+                                child: const Text('Mostrar catálogo completo'),
+                              ),
+                            ],
+                          ],
+                        ),
                       ),
                     )
                   : ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                       itemCount: products.length,
                       separatorBuilder: (_, _) => const SizedBox(height: 10),
                       itemBuilder: (context, index) {
-                        final p = products[index];
+                        final entry = products[index];
                         return _ProductoCard(
-                          producto: p,
+                          producto: entry.item,
+                          categoriaNombre: _labelCategoria(entry.categoria),
                           onTap: () => Navigator.of(context).push(
                             MaterialPageRoute<void>(
-                              builder: (_) => PagoScreen(producto: p),
+                              builder: (_) => PagoScreen(producto: entry.item),
                             ),
                           ),
                         );
@@ -202,23 +304,31 @@ class _CatalogoProductosTabState extends ConsumerState<CatalogoProductosTab> {
 class _ProductoCard extends StatelessWidget {
   const _ProductoCard({
     required this.producto,
+    required this.categoriaNombre,
     required this.onTap,
   });
 
   final ProductItemDto producto;
+  final String categoriaNombre;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final badgeText = producto.esPinOEntretenimiento
-        ? 'PIN / Entretenimiento'
+    final badgeColor = producto.esPinOEntretenimiento
+        ? AppColors.violet
         : producto.esPagoServicio
-            ? 'Servicio (monto abierto)'
-            : 'Recarga fija';
+            ? const Color(0xFF047857)
+            : AppColors.secondary;
 
-    final precioText = producto.esPagoServicio
+    final precioLabel = producto.esPrecioFijo
+        ? 'Importe fijo'
+        : (producto.precio != null && producto.precio! > 0)
+            ? 'Monto libre + comisión'
+            : 'Importe';
+
+    final precioValue = producto.esPagoServicio
         ? (producto.precio != null && producto.precio! > 0
-            ? 'Comisión: ${formatMxn(producto.precio)}'
+            ? 'Comisión ${formatMxn(producto.precio)}'
             : 'Monto abierto')
         : (producto.precio != null && producto.precio! > 0
             ? formatMxn(producto.precio)
@@ -226,124 +336,144 @@ class _ProductoCard extends StatelessWidget {
 
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(18),
       child: Card(
         child: Padding(
           padding: const EdgeInsets.all(14),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _LogoThumbnail(url: producto.urlLogo),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      producto.servicio,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14,
-                      ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ServiceLogo(
+                    urlLogo: producto.urlLogo,
+                    tipoFront: producto.tipoFront,
+                    size: 52,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: badgeColor.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            producto.etiquetaFlujo,
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w700,
+                              color: badgeColor,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          producto.producto,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 14.5,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                        Text(
+                          '${producto.servicio} · $categoriaNombre',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.mutedText,
+                          ),
+                        ),
+                      ],
                     ),
-                    Text(
-                      producto.producto,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: AppColors.mutedText,
-                      ),
+                  ),
+                ],
+              ),
+              if (producto.legend != null &&
+                  producto.legend!.trim().isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFF1F5F9)),
+                  ),
+                  child: Text(
+                    producto.legend!.trim(),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      color: Color(0xFF475569),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'ID Servicio: ${producto.idServicio} • ID Producto: ${producto.idProducto}',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontFamily: 'monospace',
-                        color: AppColors.mutedText,
-                      ),
-                    ),
-                    if (producto.legend != null &&
-                        producto.legend!.trim().isNotEmpty) ...[
-                      const SizedBox(height: 4),
+                  ),
+                ),
+              ],
+              if (producto.tipoReferencia != null &&
+                  producto.tipoReferencia!.trim().isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Referencia requerida: ${producto.tipoReferencia!.trim()}',
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    color: AppColors.mutedText,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+              const Divider(height: 20, color: Color(0xFFF1F5F9)),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       Text(
-                        producto.legend!.trim(),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                        precioLabel.toUpperCase(),
                         style: const TextStyle(
-                          fontSize: 11.5,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.mutedText,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        precioValue,
+                        style: const TextStyle(
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w800,
                           color: AppColors.primary,
                         ),
                       ),
                     ],
-                    const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 4,
+                  ),
+                  FilledButton(
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(100, 38),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                    ),
+                    onPressed: onTap,
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        _MiniTag(badgeText, AppColors.secondary),
-                        _MiniTag(precioText, AppColors.accent),
+                        Text('Pagar'),
+                        SizedBox(width: 5),
+                        Icon(Icons.arrow_forward_rounded, size: 15),
                       ],
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              const Icon(Icons.chevron_right, color: AppColors.mutedText),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _LogoThumbnail extends StatelessWidget {
-  const _LogoThumbnail({this.url});
-  final String? url;
-
-  @override
-  Widget build(BuildContext context) {
-    final clean = url?.trim();
-    return Container(
-      width: 48,
-      height: 48,
-      padding: const EdgeInsets.all(6),
-      decoration: BoxDecoration(
-        color: AppColors.background,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: (clean != null && clean.startsWith('http'))
-          ? Image.network(
-              clean,
-              fit: BoxFit.contain,
-              errorBuilder: (_, _, _) => const Icon(
-                Icons.payments_outlined,
-                color: AppColors.secondary,
-              ),
-            )
-          : const Icon(Icons.payments_outlined, color: AppColors.secondary),
-    );
-  }
-}
-
-class _MiniTag extends StatelessWidget {
-  const _MiniTag(this.text, this.color);
-  final String text;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: color,
         ),
       ),
     );

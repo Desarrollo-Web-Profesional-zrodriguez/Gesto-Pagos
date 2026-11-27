@@ -13,6 +13,7 @@ class LoginResponseDto {
     this.idCliente,
     required this.username,
     required this.nombreCliente,
+    this.biometriaFacialActiva = false,
     this.mensaje,
   });
 
@@ -26,7 +27,24 @@ class LoginResponseDto {
   final int? idCliente;
   final String username;
   final String nombreCliente;
+  final bool biometriaFacialActiva;
   final String? mensaje;
+
+  LoginResponseDto copyWith({bool? biometriaFacialActiva}) => LoginResponseDto(
+        tokenSesion: tokenSesion,
+        activa: activa,
+        tipoToken: tipoToken,
+        fechaInicio: fechaInicio,
+        fechaExpiracion: fechaExpiracion,
+        minutosInactividadMaximos: minutosInactividadMaximos,
+        idUsuario: idUsuario,
+        idCliente: idCliente,
+        username: username,
+        nombreCliente: nombreCliente,
+        biometriaFacialActiva:
+            biometriaFacialActiva ?? this.biometriaFacialActiva,
+        mensaje: mensaje,
+      );
 
   factory LoginResponseDto.fromJson(Map<String, dynamic> json) =>
       LoginResponseDto(
@@ -41,7 +59,25 @@ class LoginResponseDto {
         idCliente: (json['idCliente'] as num?)?.toInt(),
         username: json['username']?.toString() ?? '',
         nombreCliente: json['nombreCliente']?.toString() ?? '',
+        biometriaFacialActiva: json['biometriaFacialActiva'] == true,
         mensaje: json['mensaje']?.toString(),
+      );
+}
+
+class BiometriaConfigResultDto {
+  const BiometriaConfigResultDto({
+    required this.biometriaFacialActiva,
+    required this.mensaje,
+  });
+
+  final bool biometriaFacialActiva;
+  final String mensaje;
+
+  factory BiometriaConfigResultDto.fromJson(Map<String, dynamic> json) =>
+      BiometriaConfigResultDto(
+        biometriaFacialActiva: json['biometriaFacialActiva'] == true,
+        mensaje: json['mensaje']?.toString() ??
+            'Configuración de reconocimiento facial actualizada.',
       );
 }
 
@@ -75,6 +111,38 @@ class AuthRepository {
       return (res.data as Map<String, dynamic>)['valida'] == true;
     }
     return true;
+  }
+
+  Future<BiometriaConfigResultDto> configurarBiometriaFacial({
+    required String token,
+    required String passwordActual,
+    String? biometricoFacialEmbedding,
+    bool eliminar = false,
+  }) async {
+    final res = await _api.post(
+      '/auth/biometria-facial',
+      headers: {'Authorization': 'Bearer $token'},
+      body: {
+        'passwordActual': passwordActual,
+        if (biometricoFacialEmbedding != null &&
+            biometricoFacialEmbedding.trim().isNotEmpty)
+          'biometricoFacialEmbedding': biometricoFacialEmbedding.trim(),
+        'eliminar': eliminar,
+      },
+    );
+    return BiometriaConfigResultDto.fromJson(res.data as Map<String, dynamic>);
+  }
+
+  Future<bool> consultarEstadoBiometria(String token) async {
+    final res = await _api.get(
+      '/auth/biometria-facial/estado',
+      headers: {'Authorization': 'Bearer $token'},
+    );
+    if (res.data is Map<String, dynamic>) {
+      return (res.data as Map<String, dynamic>)['biometriaFacialActiva'] ==
+          true;
+    }
+    return false;
   }
 
   Future<void> logout(String token) async {

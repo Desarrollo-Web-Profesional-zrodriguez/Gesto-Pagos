@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gestopago_app/features/auth/presentation/login_screen.dart';
 import 'package:gestopago_app/features/auth/presentation/session_controller.dart';
 import 'package:gestopago_app/features/backoffice/presentation/backoffice_screen.dart';
+import 'package:gestopago_app/features/backoffice/presentation/backoffice_session.dart';
 import 'package:gestopago_app/features/cliente_portal/presentation/cliente_shell_screen.dart';
 import 'package:gestopago_app/features/onboarding/presentation/onboarding_wizard_screen.dart';
 import 'package:go_router/go_router.dart';
@@ -11,6 +12,14 @@ class _RouterRefreshNotifier extends ChangeNotifier {
   _RouterRefreshNotifier(Ref ref) {
     ref.listen<SessionState>(
       sessionControllerProvider,
+      (prev, next) {
+        if (prev?.isAuthenticated != next.isAuthenticated) {
+          notifyListeners();
+        }
+      },
+    );
+    ref.listen<BackofficeSessionState>(
+      backofficeSessionProvider,
       (prev, next) {
         if (prev?.isAuthenticated != next.isAuthenticated) {
           notifyListeners();
@@ -29,13 +38,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     refreshListenable: refreshNotifier,
     redirect: (context, state) {
       final isAuth = ref.read(sessionControllerProvider).isAuthenticated;
+      final isBackofficeAuth =
+          ref.read(backofficeSessionProvider).isAuthenticated;
       final loc = state.matchedLocation;
 
       if (loc.startsWith('/cliente') && !isAuth) {
         return '/login';
       }
+      if (loc.startsWith('/backoffice') && !isBackofficeAuth) {
+        return '/login';
+      }
       if (loc == '/login' && isAuth) {
         return '/cliente';
+      }
+      if (loc == '/login' && isBackofficeAuth) {
+        return '/backoffice';
       }
       return null;
     },

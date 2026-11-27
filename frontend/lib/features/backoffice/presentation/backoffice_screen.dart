@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gestopago_app/app/theme/app_theme.dart';
 import 'package:gestopago_app/core/validation/backend_validators.dart';
 import 'package:gestopago_app/core/widgets/app_feedback.dart';
+import 'package:gestopago_app/core/widgets/modern_selectors.dart';
+import 'package:gestopago_app/features/backoffice/presentation/backoffice_session.dart';
 import 'package:gestopago_app/features/catalogos_sistema/data/nacionalidad_repository.dart';
 import 'package:gestopago_app/features/clientes/data/cliente_models.dart';
 import 'package:gestopago_app/features/clientes/data/cliente_repository.dart';
@@ -11,6 +13,7 @@ import 'package:gestopago_app/features/cuentas/data/cuenta_repository.dart';
 import 'package:gestopago_app/features/onboarding/presentation/onboarding_wizard_screen.dart';
 import 'package:gestopago_app/features/pagos/presentation/historial_tab.dart';
 import 'package:gestopago_app/features/pagos/presentation/pago_resultado_views.dart';
+import 'package:go_router/go_router.dart';
 
 class BackofficeScreen extends ConsumerStatefulWidget {
   const BackofficeScreen({super.key});
@@ -26,6 +29,11 @@ class _BackofficeScreenState extends ConsumerState<BackofficeScreen>
     vsync: this,
   );
 
+  Future<void> _cerrarConsola() async {
+    await ref.read(backofficeSessionProvider.notifier).logout();
+    if (mounted) context.go('/login');
+  }
+
   @override
   void dispose() {
     _tabController.dispose();
@@ -36,23 +44,69 @@ class _BackofficeScreenState extends ConsumerState<BackofficeScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('BackOffice / Operador'),
+        backgroundColor: AppColors.slate950,
+        title: Row(
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: AppColors.warning.withValues(alpha: 0.16),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: AppColors.warning.withValues(alpha: 0.35),
+                ),
+              ),
+              child: const Icon(
+                Icons.business_outlined,
+                color: Color(0xFFFCD34D),
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Consola Operativa',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                  ),
+                  Text(
+                    'Administración y supervisión',
+                    style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
         actions: [
-          IconButton(
-            tooltip: 'Configurar servidor',
-            onPressed: () => showServerConfigDialog(context, ref),
-            icon: const Icon(Icons.dns_outlined),
+          TextButton.icon(
+            onPressed: _cerrarConsola,
+            icon: const Icon(
+              Icons.logout,
+              size: 18,
+              color: Color(0xFFFCA5A5),
+            ),
+            label: const Text(
+              'Salir',
+              style: TextStyle(
+                color: Color(0xFFFECDD3),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ),
         ],
         bottom: TabBar(
           controller: _tabController,
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white60,
-          indicatorColor: AppColors.accent,
+          indicatorColor: AppColors.secondary,
           tabs: const [
             Tab(icon: Icon(Icons.people_outline), text: 'Clientes'),
             Tab(icon: Icon(Icons.credit_card_outlined), text: 'Cuentas'),
-            Tab(icon: Icon(Icons.public_outlined), text: 'Catálogos / UPC'),
+            Tab(icon: Icon(Icons.public_outlined), text: 'UPC y Catálogos'),
           ],
         ),
       ),
@@ -81,11 +135,29 @@ class _ClientesAdminTabState extends ConsumerState<_ClientesAdminTab> {
   final _rfcCtrl = TextEditingController();
   final _correoCtrl = TextEditingController();
   final _cuentaCtrl = TextEditingController();
-  bool? _activoFilter;
+  String _activoFilter = 'todos';
 
   List<ClienteDto> _clientes = const [];
   bool _loading = false;
   Object? _error;
+
+  static const _estatusOptions = <SelectOption<String>>[
+    SelectOption(
+      value: 'todos',
+      label: 'Todos los estados',
+      dotColor: Color(0xFF94A3B8),
+    ),
+    SelectOption(
+      value: 'true',
+      label: 'Solo activos',
+      dotColor: AppColors.accent,
+    ),
+    SelectOption(
+      value: 'false',
+      label: 'Solo inactivos',
+      dotColor: AppColors.danger,
+    ),
+  ];
 
   @override
   void initState() {
@@ -109,6 +181,8 @@ class _ClientesAdminTabState extends ConsumerState<_ClientesAdminTab> {
       _error = null;
     });
     try {
+      final activoBool =
+          _activoFilter == 'todos' ? null : _activoFilter == 'true';
       final list = await ref.read(clienteRepositoryProvider).buscarClientes(
             ClienteBusquedaAvanzadaDto(
               identificador: _identificadorCtrl.text,
@@ -116,7 +190,7 @@ class _ClientesAdminTabState extends ConsumerState<_ClientesAdminTab> {
               rfc: _rfcCtrl.text,
               correoElectronico: _correoCtrl.text,
               numeroCuenta: _cuentaCtrl.text,
-              activo: _activoFilter,
+              activo: activoBool,
             ),
           );
       if (mounted) setState(() => _clientes = list);
@@ -132,11 +206,12 @@ class _ClientesAdminTabState extends ConsumerState<_ClientesAdminTab> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text(nuevoEstado ? 'Reactivar cliente' : 'Desactivar cliente'),
         content: Text(
           nuevoEstado
-              ? 'Se reactivará a ${cliente.nombreCompleto} y sus cuentas asociadas.'
-              : 'Se aplicará baja lógica a ${cliente.nombreCompleto} y sus cuentas pasarán a INACTIVA.',
+              ? 'Se reactivará el expediente de ${cliente.nombreCompleto} y sus cuentas asociadas.'
+              : 'Se desactivará a ${cliente.nombreCompleto} y sus cuentas pasarán a estado inactivo.',
         ),
         actions: [
           TextButton(
@@ -144,7 +219,11 @@ class _ClientesAdminTabState extends ConsumerState<_ClientesAdminTab> {
             child: const Text('Cancelar'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(minimumSize: const Size(110, 42)),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(110, 42),
+              backgroundColor:
+                  nuevoEstado ? AppColors.accent : AppColors.danger,
+            ),
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('Confirmar'),
           ),
@@ -168,33 +247,58 @@ class _ClientesAdminTabState extends ConsumerState<_ClientesAdminTab> {
 
   @override
   Widget build(BuildContext context) {
+    final activos = _clientes.where((c) => c.activo).length;
+    final inactivos = _clientes.length - activos;
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
         Row(
           children: [
             Expanded(
-              child: FilledButton.icon(
-                onPressed: () async {
-                  final created = await Navigator.of(context).push<bool>(
-                    MaterialPageRoute<bool>(
-                      builder: (_) =>
-                          const OnboardingWizardScreen(fromBackoffice: true),
-                    ),
-                  );
-                  if (created == true) await _buscar();
-                },
-                icon: const Icon(Icons.person_add_outlined),
-                label: const Text('Nuevo cliente'),
+              child: _AdminStatTile(
+                label: 'Listados',
+                value: '${_clientes.length}',
+                color: AppColors.primary,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _AdminStatTile(
+                label: 'Activos',
+                value: '$activos',
+                color: const Color(0xFF047857),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _AdminStatTile(
+                label: 'Inactivos',
+                value: '$inactivos',
+                color: AppColors.mutedText,
               ),
             ),
           ],
         ),
         const SizedBox(height: 12),
+        FilledButton.icon(
+          onPressed: () async {
+            final created = await Navigator.of(context).push<bool>(
+              MaterialPageRoute<bool>(
+                builder: (_) =>
+                    const OnboardingWizardScreen(fromBackoffice: true),
+              ),
+            );
+            if (created == true) await _buscar();
+          },
+          icon: const Icon(Icons.person_add_outlined),
+          label: const Text('Alta de nuevo cliente'),
+        ),
+        const SizedBox(height: 12),
         Card(
           child: ExpansionTile(
             title: const Text(
-              'Búsqueda avanzada (POST /clientes/buscar)',
+              'Búsqueda avanzada de clientes',
               style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
             ),
             initiallyExpanded: true,
@@ -203,15 +307,17 @@ class _ClientesAdminTabState extends ConsumerState<_ClientesAdminTab> {
               TextField(
                 controller: _identificadorCtrl,
                 decoration: const InputDecoration(
-                  labelText: 'Identificador general (nombre, CURP, RFC, correo)',
+                  labelText: 'Identificador (nombre, CURP, RFC o correo)',
+                  prefixIcon: Icon(Icons.search),
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               Row(
                 children: [
                   Expanded(
                     child: TextField(
                       controller: _curpCtrl,
+                      textCapitalization: TextCapitalization.characters,
                       decoration: const InputDecoration(labelText: 'CURP'),
                     ),
                   ),
@@ -219,17 +325,19 @@ class _ClientesAdminTabState extends ConsumerState<_ClientesAdminTab> {
                   Expanded(
                     child: TextField(
                       controller: _rfcCtrl,
+                      textCapitalization: TextCapitalization.characters,
                       decoration: const InputDecoration(labelText: 'RFC'),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               Row(
                 children: [
                   Expanded(
                     child: TextField(
                       controller: _correoCtrl,
+                      keyboardType: TextInputType.emailAddress,
                       decoration: const InputDecoration(labelText: 'Correo'),
                     ),
                   ),
@@ -237,20 +345,17 @@ class _ClientesAdminTabState extends ConsumerState<_ClientesAdminTab> {
                   Expanded(
                     child: TextField(
                       controller: _cuentaCtrl,
+                      keyboardType: TextInputType.number,
                       decoration: const InputDecoration(labelText: 'Cuenta'),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<bool?>(
-                initialValue: _activoFilter,
-                decoration: const InputDecoration(labelText: 'Estatus'),
-                items: const [
-                  DropdownMenuItem(value: null, child: Text('Todos')),
-                  DropdownMenuItem(value: true, child: Text('Solo activos')),
-                  DropdownMenuItem(value: false, child: Text('Solo inactivos')),
-                ],
+              const SizedBox(height: 10),
+              ModernSelectField<String>(
+                label: 'Estado de expediente',
+                value: _activoFilter,
+                options: _estatusOptions,
                 onChanged: (v) => setState(() => _activoFilter = v),
               ),
               const SizedBox(height: 12),
@@ -264,7 +369,7 @@ class _ClientesAdminTabState extends ConsumerState<_ClientesAdminTab> {
                         _rfcCtrl.clear();
                         _correoCtrl.clear();
                         _cuentaCtrl.clear();
-                        setState(() => _activoFilter = null);
+                        setState(() => _activoFilter = 'todos');
                         _buscar();
                       },
                       child: const Text('Limpiar'),
@@ -296,7 +401,12 @@ class _ClientesAdminTabState extends ConsumerState<_ClientesAdminTab> {
         else if (_clientes.isEmpty)
           const Padding(
             padding: EdgeInsets.all(24),
-            child: Center(child: Text('Sin resultados.')),
+            child: Center(
+              child: Text(
+                'No se encontraron expedientes con esos criterios.',
+                style: TextStyle(color: AppColors.mutedText),
+              ),
+            ),
           )
         else
           ..._clientes.map((c) {
@@ -317,53 +427,75 @@ class _ClientesAdminTabState extends ConsumerState<_ClientesAdminTab> {
                               style: const TextStyle(
                                 fontWeight: FontWeight.w800,
                                 fontSize: 15,
+                                color: AppColors.primary,
                               ),
                             ),
                           ),
-                          Chip(
-                            label: Text(
-                              c.activo ? 'ACTIVO' : 'INACTIVO',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                color: c.activo
-                                    ? AppColors.accent
-                                    : AppColors.danger,
-                              ),
-                            ),
-                            visualDensity: VisualDensity.compact,
+                          StatusBadge(
+                            estatus: c.activo ? 'ACTIVA' : 'INACTIVO',
                           ),
                         ],
                       ),
+                      const SizedBox(height: 4),
                       Text(
-                        '${c.correoElectronico} • CURP: ${c.curp}',
+                        '${c.correoElectronico} • Tel: ${c.telefonoMovil}',
                         style: const TextStyle(
                           fontSize: 12,
                           color: AppColors.mutedText,
                         ),
                       ),
-                      if (cuenta != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          CopyChip(
+                            value: c.curp,
+                            displayLabel: 'CURP: ${c.curp}',
+                            copyLabel: 'CURP',
+                          ),
+                          CopyChip(
+                            value: c.rfc,
+                            displayLabel: 'RFC: ${c.rfc}',
+                            copyLabel: 'RFC',
+                          ),
+                        ],
+                      ),
+                      if (cuenta != null) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.emeraldSoft,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
                           child: Text(
-                            'Cuenta ${cuenta.numeroCuenta} (${cuenta.estatus}) • Saldo: ${formatMxn(cuenta.saldo?.saldoDisponible)}',
+                            '${maskCuenta(cuenta.numeroCuenta)} · ${formatMxn(cuenta.saldo?.saldoDisponible)}',
                             style: const TextStyle(
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w600,
+                              fontFamily: 'monospace',
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF047857),
                             ),
                           ),
                         ),
+                      ],
                       const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
                         children: [
                           TextButton.icon(
                             onPressed: () async {
                               final updated =
                                   await Navigator.of(context).push<ClienteDto>(
                                 MaterialPageRoute<ClienteDto>(
-                                  builder: (_) =>
-                                      ClienteEditScreen(cliente: c),
+                                  builder: (_) => ClienteEditScreen(
+                                    cliente: c,
+                                    allowFullReplace: true,
+                                  ),
                                 ),
                               );
                               if (updated != null) await _buscar();
@@ -371,6 +503,7 @@ class _ClientesAdminTabState extends ConsumerState<_ClientesAdminTab> {
                             icon: const Icon(Icons.edit_outlined, size: 16),
                             label: const Text('Editar'),
                           ),
+                          const SizedBox(width: 4),
                           TextButton.icon(
                             onPressed: () => _toggleActivo(c),
                             icon: Icon(
@@ -400,6 +533,45 @@ class _ClientesAdminTabState extends ConsumerState<_ClientesAdminTab> {
             );
           }),
       ],
+    );
+  }
+}
+
+class _AdminStatTile extends StatelessWidget {
+  const _AdminStatTile({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(fontSize: 11, color: AppColors.mutedText),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -472,7 +644,7 @@ class _CuentasAdminTabState extends ConsumerState<_CuentasAdminTab> {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => Scaffold(
-          appBar: AppBar(title: Text('Historial $numCuenta')),
+          appBar: AppBar(title: Text('Historial · ${maskCuenta(numCuenta)}')),
           body: HistorialTab(numeroCuentaOverride: numCuenta),
         ),
       ),
@@ -481,9 +653,35 @@ class _CuentasAdminTabState extends ConsumerState<_CuentasAdminTab> {
 
   @override
   Widget build(BuildContext context) {
+    final liquidez = _activas.fold<double>(
+      0.0,
+      (acc, c) => acc + (c.saldo?.saldoDisponible ?? 0.0),
+    );
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        Row(
+          children: [
+            Expanded(
+              child: _AdminStatTile(
+                label: 'Cuentas activas',
+                value: '${_activas.length}',
+                color: AppColors.primary,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              flex: 2,
+              child: _AdminStatTile(
+                label: 'Liquidez disponible',
+                value: formatMxn(liquidez),
+                color: const Color(0xFF047857),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(14),
@@ -491,7 +689,7 @@ class _CuentasAdminTabState extends ConsumerState<_CuentasAdminTab> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const Text(
-                  'Consulta directa (GET /cuentas/{numeroCuenta})',
+                  'Consulta directa por número de cuenta',
                   style: TextStyle(fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 8),
@@ -520,12 +718,21 @@ class _CuentasAdminTabState extends ConsumerState<_CuentasAdminTab> {
                 ),
                 if (_consultaIndividual != null) ...[
                   const Divider(height: 20),
-                  Text(
-                    'Titular: ${_consultaIndividual!.nombreTitular ?? 'N/A'}',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Titular: ${_consultaIndividual!.nombreTitular ?? 'No disponible'}',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      StatusBadge(estatus: _consultaIndividual!.estatus),
+                    ],
                   ),
+                  const SizedBox(height: 4),
                   Text(
                     'Disponible: ${formatMxn(_consultaIndividual!.saldo?.saldoDisponible)} • Contable: ${formatMxn(_consultaIndividual!.saldo?.saldoContable)}',
+                    style: const TextStyle(fontSize: 12.5),
                   ),
                   Align(
                     alignment: Alignment.centerRight,
@@ -559,21 +766,48 @@ class _CuentasAdminTabState extends ConsumerState<_CuentasAdminTab> {
           (cta) => Padding(
             padding: const EdgeInsets.only(bottom: 10),
             child: Card(
-              child: ListTile(
-                title: Text(
-                  cta.numeroCuenta,
-                  style: const TextStyle(
-                    fontFamily: 'monospace',
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                subtitle: Text(
-                  '${cta.nombreTitular ?? ''}\nDisponible: ${formatMxn(cta.saldo?.saldoDisponible)}',
-                ),
-                trailing: IconButton(
-                  tooltip: 'Ver historial',
-                  onPressed: () => _verHistorialCuenta(cta.numeroCuenta),
-                  icon: const Icon(Icons.receipt_long_outlined),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        CopyChip(
+                          value: cta.numeroCuenta,
+                          copyLabel: 'Número de cuenta',
+                        ),
+                        StatusBadge(estatus: cta.estatus),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '${cta.nombreTitular ?? 'Titular'} · ${cta.tipoCuenta}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13.5,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Disponible: ${formatMxn(cta.saldo?.saldoDisponible)}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF047857),
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: () => _verHistorialCuenta(cta.numeroCuenta),
+                          icon: const Icon(Icons.receipt_long_outlined, size: 16),
+                          label: const Text('Historial'),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -634,7 +868,7 @@ class _CatalogosYUpcAdminTabState
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const Text(
-                  'Consultar Estatus de Pago por UPC (GET /pagos/estatus/{upc})',
+                  'Consulta de pago por folio UPC',
                   style: TextStyle(fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 8),
@@ -644,8 +878,9 @@ class _CatalogosYUpcAdminTabState
                       child: TextField(
                         controller: _upcCtrl,
                         maxLength: 10,
+                        textCapitalization: TextCapitalization.characters,
                         decoration: const InputDecoration(
-                          labelText: 'UPC (10 caracteres alfanuméricos)',
+                          labelText: 'Folio UPC (10 caracteres)',
                           counterText: '',
                         ),
                       ),
@@ -668,7 +903,7 @@ class _CatalogosYUpcAdminTabState
                             builder: (_) => PagoConciliacionScreen(
                               upc: _upcCtrl.text.trim(),
                               mensajeInicial:
-                                  'Consulta manual desde BackOffice',
+                                  'Consulta de seguimiento administrativo',
                             ),
                           ),
                         );
@@ -689,7 +924,7 @@ class _CatalogosYUpcAdminTabState
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const Text(
-                  'Buscar Nacionalidad (POST /catalogos/nacionalidades/buscar)',
+                  'Buscar nacionalidad',
                   style: TextStyle(fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 8),
@@ -699,7 +934,7 @@ class _CatalogosYUpcAdminTabState
                       child: TextField(
                         controller: _nacCtrl,
                         decoration: const InputDecoration(
-                          labelText: 'ISO, país o gentilicio (ej. MEX)',
+                          labelText: 'Código ISO, país o gentilicio (ej. MEX)',
                         ),
                       ),
                     ),
@@ -716,7 +951,7 @@ class _CatalogosYUpcAdminTabState
                 if (_nacBuscada != null) ...[
                   const SizedBox(height: 8),
                   Text(
-                    'Resultado: ID ${_nacBuscada!.idNacionalidad} • ${_nacBuscada!.claveIso} • ${_nacBuscada!.pais} (${_nacBuscada!.gentilicio})',
+                    'Resultado: ${_nacBuscada!.claveIso} • ${_nacBuscada!.pais} (${_nacBuscada!.gentilicio})',
                     style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
                 ],
@@ -730,7 +965,7 @@ class _CatalogosYUpcAdminTabState
         ),
         const SizedBox(height: 14),
         const Text(
-          'Catálogo completo de Nacionalidades',
+          'Catálogo de Nacionalidades',
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
         ),
         const SizedBox(height: 8),
@@ -746,14 +981,21 @@ class _CatalogosYUpcAdminTabState
                       child: ListTile(
                         dense: true,
                         leading: CircleAvatar(
+                          backgroundColor: AppColors.skySoft,
                           child: Text(
                             n.claveIso,
-                            style: const TextStyle(fontSize: 11),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.secondary,
+                            ),
                           ),
                         ),
-                        title: Text(n.pais),
+                        title: Text(
+                          n.pais,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
                         subtitle: Text('Gentilicio: ${n.gentilicio}'),
-                        trailing: Text('ID ${n.idNacionalidad}'),
                       ),
                     ),
                   ),

@@ -1,36 +1,49 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:gestopago_app/core/biometrics/face_scanner_sheet.dart';
 
-/// Contrato abstracto para la futura integración de biometría facial MediaPipe
-/// con cámara nativa en Android / iOS.
-///
-/// El backend espera un string con un vector JSON de flotantes
-/// (por ejemplo: `"[0.12, -0.45, 0.89, -0.05, 0.67]"`), comparado por similitud
-/// coseno >= 0.80 en `BiometriaFacialUtil`.
+/// Proveedor de captura y verificación de reconocimiento facial mediante cámara frontal.
 abstract class FaceEmbeddingProvider {
   bool get isCameraSupported;
 
   String get statusMessage;
 
-  Future<String?> captureFacialEmbedding();
+  Future<String?> captureFacialEmbedding(
+    BuildContext context, {
+    String title = 'Reconocimiento Facial',
+    String subtitle = 'Centra tu rostro frente a la cámara con buena iluminación',
+  });
 }
 
-/// Implementación inicial mientras el flujo opera con contraseña/token.
-/// Lista para reemplazarse por MediaPipe Face Landmarker + TFLite sin cambiar
-/// repositorios ni pantallas.
-class PlaceholderFaceEmbeddingProvider implements FaceEmbeddingProvider {
-  const PlaceholderFaceEmbeddingProvider();
+class MobileCameraFaceEmbeddingProvider implements FaceEmbeddingProvider {
+  const MobileCameraFaceEmbeddingProvider();
 
   @override
-  bool get isCameraSupported => false;
+  bool get isCameraSupported => !kIsWeb;
 
   @override
   String get statusMessage =>
-      'Reconocimiento facial MediaPipe programado para la siguiente fase. Usa contraseña o sesión activa.';
+      'Verificación de identidad con cámara frontal activa.';
 
   @override
-  Future<String?> captureFacialEmbedding() async => null;
+  Future<String?> captureFacialEmbedding(
+    BuildContext context, {
+    String title = 'Reconocimiento Facial',
+    String subtitle = 'Centra tu rostro frente a la cámara con buena iluminación',
+  }) {
+    return showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => FaceScannerSheet(
+        title: title,
+        subtitle: subtitle,
+      ),
+    );
+  }
 }
 
 final faceEmbeddingProvider = Provider<FaceEmbeddingProvider>(
-  (ref) => const PlaceholderFaceEmbeddingProvider(),
+  (ref) => const MobileCameraFaceEmbeddingProvider(),
 );

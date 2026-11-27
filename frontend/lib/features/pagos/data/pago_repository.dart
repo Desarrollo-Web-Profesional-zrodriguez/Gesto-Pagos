@@ -3,6 +3,16 @@ import 'package:gestopago_app/core/network/api_error.dart';
 import 'package:gestopago_app/core/network/dio_client.dart';
 import 'package:gestopago_app/core/network/strict_decimal_json.dart';
 
+class HistoryRefreshNotifier extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  void bump() => state++;
+}
+
+final historyRefreshSignalProvider =
+    NotifierProvider<HistoryRefreshNotifier, int>(HistoryRefreshNotifier.new);
+
 class ValidarReferenciaRequestDto {
   const ValidarReferenciaRequestDto({
     required this.numCuenta,
@@ -383,6 +393,7 @@ class ComprobanteEmailDto {
     this.referencia,
     this.montoPagado,
     this.comision,
+    this.pin,
     this.legend,
     this.fechaProveedor,
     this.horaLocal,
@@ -404,6 +415,7 @@ class ComprobanteEmailDto {
   final String? referencia;
   final double? montoPagado;
   final double? comision;
+  final String? pin;
   final String? legend;
   final String? fechaProveedor;
   final String? horaLocal;
@@ -426,6 +438,7 @@ class ComprobanteEmailDto {
         if (referencia != null) 'referencia': referencia,
         if (montoPagado != null) 'montoPagado': montoPagado,
         if (comision != null) 'comision': comision,
+        if (pin != null && pin!.trim().isNotEmpty) 'pin': pin!.trim(),
         if (legend != null) 'legend': legend,
         if (fechaProveedor != null) 'fechaProveedor': fechaProveedor,
         if (horaLocal != null) 'horaLocal': horaLocal,
@@ -481,7 +494,6 @@ class PagoRepository {
       '/pagos',
       body: request.toStrictJsonMap(),
       headers: {'Idempotency-Key': idempotencyKey},
-      // El backend tiene read-timeout=65s hacia GestoPago.
       receiveTimeout: const Duration(seconds: 75),
     );
 
