@@ -6,5 +6,14 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true
+  },
+  preview: {
+    port: 4173,
+    host: true
+  },
+  build: {
+    outDir: 'dist',
+    sourcemap: false,
+    target: 'es2019'
   }
 });
