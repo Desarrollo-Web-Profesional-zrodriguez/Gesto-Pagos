@@ -133,6 +133,7 @@ export interface ComprobantePagoEmailInput {
   referencia?: string;
   montoPagado?: StrictDecimal;
   comision?: StrictDecimal;
+  pin?: string;
   legend?: string;
   fechaProveedor?: string;
   horaLocal?: string;

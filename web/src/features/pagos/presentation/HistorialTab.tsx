@@ -1,13 +1,28 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  CheckCircle2,
+  Clock,
   Eye,
+  History,
   Loader2,
   Mail,
+  Receipt,
   RefreshCw,
   Search,
   X,
+  XCircle,
 } from 'lucide-react';
-import { ErrorBanner, ServiceLogo, StatusBadge } from '../../../core/components/UiPrimitives';
+import { ModalShell } from '../../../core/components/ModalShell';
+import { useToast } from '../../../core/components/ToastContext';
+import {
+  CopyChip,
+  EmptyState,
+  ErrorBanner,
+  FieldError,
+  ServiceLogo,
+  SkeletonBlock,
+  StatusBadge,
+} from '../../../core/components/UiPrimitives';
 import { StrictDecimal } from '../../../core/network/strictDecimal';
 import { useSession } from '../../../core/session/SessionContext';
 import { formatFecha, formatMxn } from '../../../core/utils/formatters';
@@ -20,6 +35,7 @@ import {
 
 export const HistorialTab: React.FC = () => {
   const { cliente, cuentaActiva, refreshPerfilYSaldo } = useSession();
+  const { notify } = useToast();
 
   const [items, setItems] = useState<TransaccionHistorialDto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -31,8 +47,9 @@ export const HistorialTab: React.FC = () => {
   const [liveStatus, setLiveStatus] = useState<PagoEstatusResponseDto | null>(null);
   const [checkingLive, setCheckingLive] = useState(false);
   const [emailDest, setEmailDest] = useState('');
+  const [emailDestError, setEmailDestError] = useState<string | null>(null);
   const [sendingEmail, setSendingEmail] = useState(false);
-  const [emailFeedback, setEmailFeedback] = useState<string | null>(null);
+  const [emailSentMsg, setEmailSentMsg] = useState<string | null>(null);
 
   const cargarHistorial = async () => {
     if (!cuentaActiva?.numeroCuenta) {
@@ -61,13 +78,19 @@ export const HistorialTab: React.FC = () => {
     let exitosas = 0;
     let pendientes = 0;
     let rechazadas = 0;
+    let volumenExitoso = 0;
     for (const tx of items) {
       const est = (tx.estatus ?? '').toUpperCase();
-      if (est === 'EXITOSA') exitosas++;
-      else if (est === 'PENDIENTE_CONCILIACION' || est === 'PROCESANDO') pendientes++;
-      else rechazadas++;
+      if (est === 'EXITOSA') {
+        exitosas++;
+        volumenExitoso += tx.monto ?? 0;
+      } else if (est === 'PENDIENTE_CONCILIACION' || est === 'PROCESANDO') {
+        pendientes++;
+      } else {
+        rechazadas++;
+      }
     }
-    return { total: items.length, exitosas, pendientes, rechazadas };
+    return { total: items.length, exitosas, pendientes, rechazadas, volumenExitoso };
   }, [items]);
 
   const filtered = useMemo(() => {
@@ -104,7 +127,8 @@ export const HistorialTab: React.FC = () => {
     setSelectedTx(tx);
     setLiveStatus(null);
     setEmailDest(cliente?.correoElectronico ?? '');
-    setEmailFeedback(null);
+    setEmailDestError(null);
+    setEmailSentMsg(null);
   };
 
   const handleCheckLive = async (upc: string) => {
@@ -114,6 +138,11 @@ export const HistorialTab: React.FC = () => {
       setLiveStatus(est);
       await cargarHistorial();
       await refreshPerfilYSaldo();
+      notify({
+        title: 'Estatus verificado en vivo',
+        description: `UPC ${upc}: ${est.estatus}`,
+        variant: 'info',
+      });
     } catch (err) {
       setError(err);
     } finally {
@@ -121,14 +150,16 @@ export const HistorialTab: React.FC = () => {
     }
   };
 
-  const handleResendEmail = async (tx: TransaccionHistorialDto) => {
+  const handleResendEmail = async (e: React.FormEvent, tx: TransaccionHistorialDto) => {
+    e.preventDefault();
+    setEmailSentMsg(null);
     const mailErr = BackendValidators.email(emailDest, true);
     if (mailErr) {
-      setEmailFeedback(mailErr);
+      setEmailDestError(mailErr);
       return;
     }
+    setEmailDestError(null);
     setSendingEmail(true);
-    setEmailFeedback(null);
     try {
       const res = await pagoRepository.enviarComprobanteEmail({
         destinatarioEmail: emailDest.trim(),
@@ -151,9 +182,16 @@ export const HistorialTab: React.FC = () => {
         logoUrl: tx.urlLogo,
         tipoFront: tx.referencia ? 2 : 1,
       });
-      setEmailFeedback(res.mensaje || (res.enviado ? 'Comprobante enviado.' : 'Error enviando.'));
+      if (res.enviado !== false) {
+        setEmailSentMsg(res.mensaje || 'Comprobante enviado correctamente.');
+        notify({ title: 'Comprobante enviado', description: emailDest.trim(), variant: 'success' });
+      } else {
+        setEmailDestError(res.mensaje || 'No fue posible enviar el comprobante.');
+      }
     } catch (err) {
-      setEmailFeedback(err instanceof Error ? err.message : 'No fue posible enviar el correo');
+      setEmailDestError(
+        err instanceof Error ? err.message : 'No fue posible enviar el correo.'
+      );
     } finally {
       setSendingEmail(false);
     }
@@ -163,9 +201,11 @@ export const HistorialTab: React.FC = () => {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gp-primary">Historial de Pagos</h2>
-          <p className="text-sm text-gp-muted">
-            Operaciones exclusivas de tu cuenta activa sincronizadas entre Web y Flutter
+          <h2 className="text-2xl font-extrabold tracking-tight text-gp-primary">
+            Historial de Operaciones
+          </h2>
+          <p className="mt-0.5 text-sm text-gp-muted">
+            Bitácora auditable de transacciones, comprobantes y seguimiento por UPC
           </p>
         </div>
         <button
@@ -175,72 +215,156 @@ export const HistorialTab: React.FC = () => {
           className="btn-secondary"
         >
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          Actualizar historial
+          <span>Actualizar</span>
         </button>
       </div>
 
       <ErrorBanner error={error} onDismiss={() => setError(null)} />
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {[
-          { label: 'Total operaciones', value: counts.total, color: 'text-gp-primary' },
-          { label: 'Exitosas', value: counts.exitosas, color: 'text-emerald-700' },
-          { label: 'Pendientes', value: counts.pendientes, color: 'text-amber-700' },
-          { label: 'Rechazadas', value: counts.rechazadas, color: 'text-red-700' },
-        ].map((stat) => (
-          <div key={stat.label} className="card-surface p-4">
-            <p className="text-xs font-medium text-gp-muted">{stat.label}</p>
-            <p className={`mt-1 text-2xl font-extrabold ${stat.color}`}>{stat.value}</p>
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
+        <div className="card-surface p-4">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-gp-muted">Total operaciones</span>
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-gp-primary">
+              <Receipt className="h-4 w-4" />
+            </div>
           </div>
-        ))}
+          <p className="mt-2 font-display text-2xl font-extrabold text-gp-primary tabular-nums">
+            {counts.total}
+          </p>
+          <p className="mt-0.5 text-[11px] text-gp-muted">
+            Pagado: <span className="font-mono font-semibold">{formatMxn(counts.volumenExitoso)}</span>
+          </p>
+        </div>
+
+        <div className="card-surface p-4">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-gp-muted">Exitosas</span>
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
+              <CheckCircle2 className="h-4 w-4" />
+            </div>
+          </div>
+          <p className="mt-2 font-display text-2xl font-extrabold text-emerald-700 tabular-nums">
+            {counts.exitosas}
+          </p>
+          <p className="mt-0.5 text-[11px] text-gp-muted">Cargo confirmado</p>
+        </div>
+
+        <div className="card-surface p-4">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-gp-muted">En conciliación</span>
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-50 text-amber-600">
+              <Clock className="h-4 w-4" />
+            </div>
+          </div>
+          <p className="mt-2 font-display text-2xl font-extrabold text-amber-700 tabular-nums">
+            {counts.pendientes}
+          </p>
+          <p className="mt-0.5 text-[11px] text-gp-muted">Verificación automática</p>
+        </div>
+
+        <div className="card-surface p-4">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-gp-muted">No aplicadas</span>
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-rose-50 text-rose-600">
+              <XCircle className="h-4 w-4" />
+            </div>
+          </div>
+          <p className="mt-2 font-display text-2xl font-extrabold text-rose-700 tabular-nums">
+            {counts.rechazadas}
+          </p>
+          <p className="mt-0.5 text-[11px] text-gp-muted">Retención liberada</p>
+        </div>
       </div>
 
-      {/* Filters */}
-      <div className="card-surface space-y-3 p-4">
+      {/* Search & Status Filter Bar */}
+      <div className="card-surface space-y-3.5 p-4 sm:p-5">
         <div className="relative">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gp-muted" />
           <input
-            type="search"
-            className="input-field pl-10"
+            type="text"
+            className="input-field pl-10 pr-9"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Filtrar por servicio, referencia, teléfono, UPC o autorización..."
+            placeholder="Filtrar por servicio, referencia, teléfono, UPC o número de autorización..."
           />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              aria-label="Limpiar búsqueda"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-lg p-1 text-gp-muted hover:bg-slate-100 hover:text-gp-primary"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
         </div>
+
         <div className="flex flex-wrap gap-2">
           {[
-            { id: 'TODOS', label: 'Todos' },
-            { id: 'EXITOSA', label: 'Exitosas' },
-            { id: 'PENDIENTE', label: 'Pendientes' },
-            { id: 'RECHAZADA', label: 'Rechazadas / Error' },
-          ].map((f) => (
-            <button
-              key={f.id}
-              type="button"
-              onClick={() => setStatusFilter(f.id)}
-              className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
-                statusFilter === f.id
-                  ? 'bg-gp-primary text-white'
-                  : 'bg-slate-100 text-gp-muted hover:bg-slate-200 hover:text-gp-primary'
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
+            { id: 'TODOS', label: 'Todas', count: counts.total },
+            { id: 'EXITOSA', label: 'Exitosas', count: counts.exitosas },
+            { id: 'PENDIENTE', label: 'En conciliación', count: counts.pendientes },
+            { id: 'RECHAZADA', label: 'Rechazadas / Revisión', count: counts.rechazadas },
+          ].map((f) => {
+            const active = statusFilter === f.id;
+            return (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setStatusFilter(f.id)}
+                className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
+                  active
+                    ? 'bg-slate-950 text-white shadow-sm'
+                    : 'bg-slate-100 text-gp-muted hover:bg-slate-200 hover:text-gp-primary'
+                }`}
+              >
+                <span>{f.label}</span>
+                <span
+                  className={`rounded-full px-1.5 py-0.5 font-mono text-[10px] tabular-nums ${
+                    active ? 'bg-white/20 text-white' : 'bg-white text-gp-muted'
+                  }`}
+                >
+                  {f.count}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
       {/* Transactions List */}
       {loading ? (
-        <div className="card-surface flex flex-col items-center justify-center gap-3 py-16 text-gp-muted">
-          <Loader2 className="h-8 w-8 animate-spin text-gp-secondary" />
-          <p className="text-sm font-medium">Consultando operaciones de la cuenta...</p>
+        <div className="space-y-3">
+          {Array.from({ length: 4 }).map((_, idx) => (
+            <SkeletonBlock key={idx} className="h-24" />
+          ))}
         </div>
       ) : filtered.length === 0 ? (
-        <div className="card-surface py-16 text-center text-sm text-gp-muted">
-          No hay transacciones registradas para el criterio seleccionado.
-        </div>
+        <EmptyState
+          icon={History}
+          title="No hay transacciones para mostrar"
+          description={
+            search || statusFilter !== 'TODOS'
+              ? 'Ningún movimiento coincide con los filtros actuales.'
+              : 'Cuando realices pagos de servicios o recargas aparecerán listados aquí.'
+          }
+          action={
+            search || statusFilter !== 'TODOS' ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch('');
+                  setStatusFilter('TODOS');
+                }}
+                className="btn-secondary text-xs"
+              >
+                Limpiar filtros
+              </button>
+            ) : undefined
+          }
+        />
       ) : (
         <div className="space-y-3">
           {filtered.map((tx) => {
@@ -249,9 +373,10 @@ export const HistorialTab: React.FC = () => {
             return (
               <div
                 key={tx.upc || `${tx.idTransaccionLocal}-${tx.fechaCreacion}`}
-                className="card-surface flex flex-col justify-between gap-4 p-4 transition hover:border-sky-300 sm:flex-row sm:items-center"
+                onClick={() => openDetalle(tx)}
+                className="card-interactive flex cursor-pointer flex-col justify-between gap-4 p-4 sm:flex-row sm:items-center sm:p-5"
               >
-                <div className="flex items-start gap-3.5">
+                <div className="flex min-w-0 items-start gap-3.5">
                   <ServiceLogo
                     urlLogo={tx.urlLogo}
                     alt={tx.servicio || labelServicio}
@@ -259,19 +384,23 @@ export const HistorialTab: React.FC = () => {
                   />
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-sm font-bold text-gp-primary">{labelServicio}</h3>
+                      <h3 className="truncate text-sm font-bold text-gp-primary">
+                        {labelServicio}
+                      </h3>
                       <StatusBadge estatus={tx.estatus} />
                     </div>
                     {tx.servicio && tx.producto && (
                       <p className="text-xs font-medium text-gp-muted">{tx.servicio}</p>
                     )}
-                    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gp-muted">
+                    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gp-muted">
                       <span>
                         Ref/Tel: <strong className="font-mono text-gp-primary">{refOrTel}</strong>
                       </span>
-                      <span>
-                        UPC: <strong className="font-mono text-gp-primary">{tx.upc || '-'}</strong>
-                      </span>
+                      {tx.upc && (
+                        <span className="inline-flex items-center gap-1">
+                          UPC: <CopyChip value={tx.upc} toastTitle="UPC copiado" />
+                        </span>
+                      )}
                       {tx.numAutorizacion && (
                         <span>
                           Aut:{' '}
@@ -285,24 +414,27 @@ export const HistorialTab: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between gap-4 sm:justify-end">
+                <div className="flex items-center justify-between gap-4 border-t border-slate-100 pt-3 sm:justify-end sm:border-0 sm:pt-0">
                   <div className="text-left sm:text-right">
-                    <p className="text-base font-extrabold text-gp-primary">
+                    <p className="font-display text-base font-extrabold text-gp-primary tabular-nums">
                       {formatMxn(tx.monto)}
                     </p>
                     {(tx.comision ?? 0) > 0 && (
-                      <p className="text-[11px] text-gp-muted">
-                        Comisión: {formatMxn(tx.comision)}
+                      <p className="font-mono text-[11px] text-gp-muted tabular-nums">
+                        +{formatMxn(tx.comision)} comisión
                       </p>
                     )}
                   </div>
                   <button
                     type="button"
-                    onClick={() => openDetalle(tx)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openDetalle(tx);
+                    }}
                     className="btn-secondary px-3 py-2 text-xs"
                   >
                     <Eye className="h-3.5 w-3.5" />
-                    Detalle
+                    Comprobante
                   </button>
                 </div>
               </div>
@@ -312,121 +444,169 @@ export const HistorialTab: React.FC = () => {
       )}
 
       {/* Transaction Detail Modal */}
-      {selectedTx && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
-          <div className="flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-3xl border border-gp-border bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-gp-border px-6 py-4">
-              <div className="flex items-center gap-3">
-                <ServiceLogo
-                  urlLogo={selectedTx.urlLogo}
-                  alt={selectedTx.servicio || 'Servicio'}
-                  tipoFront={selectedTx.referencia ? 2 : 1}
-                />
-                <div>
-                  <h3 className="text-base font-bold text-gp-primary">
-                    {selectedTx.producto || selectedTx.servicio || 'Detalle de Operación'}
-                  </h3>
-                  <p className="text-xs text-gp-muted">Folio UPC: {selectedTx.upc || 'N/A'}</p>
-                </div>
+      <ModalShell
+        open={Boolean(selectedTx)}
+        onClose={() => setSelectedTx(null)}
+        maxWidthClass="max-w-xl"
+        title={
+          selectedTx
+            ? selectedTx.producto || selectedTx.servicio || 'Detalle de Operación'
+            : 'Detalle'
+        }
+        subtitle={selectedTx ? `Folio UPC: ${selectedTx.upc || 'N/A'}` : undefined}
+        icon={
+          selectedTx ? (
+            <ServiceLogo
+              urlLogo={selectedTx.urlLogo}
+              alt={selectedTx.servicio || 'Servicio'}
+              tipoFront={selectedTx.referencia ? 2 : 1}
+            />
+          ) : undefined
+        }
+      >
+        {selectedTx && (
+          <div className="space-y-4 text-sm">
+            <div className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-slate-50 px-4 py-3">
+              <span className="text-xs font-semibold text-gp-muted">Estado de la transacción</span>
+              <StatusBadge estatus={liveStatus?.estatus ?? selectedTx.estatus} />
+            </div>
+
+            <div className="space-y-2 rounded-2xl border border-gp-border p-4 text-xs sm:text-sm">
+              <div className="flex items-center justify-between gap-4 border-b border-slate-100 py-1.5">
+                <span className="text-gp-muted">Servicio</span>
+                <span className="text-right font-semibold text-gp-primary">
+                  {selectedTx.servicio || `#${selectedTx.idServicio}`}
+                </span>
               </div>
+              <div className="flex items-center justify-between gap-4 border-b border-slate-100 py-1.5">
+                <span className="text-gp-muted">Producto</span>
+                <span className="text-right font-medium text-gp-primary">
+                  {selectedTx.producto || `#${selectedTx.idProducto}`}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4 border-b border-slate-100 py-1.5">
+                <span className="text-gp-muted">Referencia / Teléfono</span>
+                <CopyChip
+                  value={selectedTx.referencia || selectedTx.telefono}
+                  toastTitle="Referencia copiada"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-4 border-b border-slate-100 py-1.5">
+                <span className="text-gp-muted">Importe pagado</span>
+                <span className="font-mono font-bold text-gp-primary tabular-nums">
+                  {formatMxn(selectedTx.monto)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4 border-b border-slate-100 py-1.5">
+                <span className="text-gp-muted">Comisión</span>
+                <span className="font-mono text-gp-primary tabular-nums">
+                  {formatMxn(selectedTx.comision ?? 0)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4 border-b border-slate-100 py-1.5">
+                <span className="text-gp-muted">Folio UPC</span>
+                <CopyChip value={selectedTx.upc} toastTitle="UPC copiado" />
+              </div>
+              <div className="flex items-center justify-between gap-4 border-b border-slate-100 py-1.5">
+                <span className="text-gp-muted">Número de autorización</span>
+                {selectedTx.numAutorizacion ? (
+                  <CopyChip
+                    value={selectedTx.numAutorizacion}
+                    toastTitle="Autorización copiada"
+                  />
+                ) : (
+                  <span className="text-gp-muted">Pendiente / Sin folio</span>
+                )}
+              </div>
+              <div className="flex items-center justify-between gap-4 border-b border-slate-100 py-1.5">
+                <span className="text-gp-muted">ID de operación</span>
+                <span className="font-mono text-gp-primary">{selectedTx.idTxGestoPago || '-'}</span>
+              </div>
+              <div className="flex items-center justify-between gap-4 border-b border-slate-100 py-1.5">
+                <span className="text-gp-muted">Respuesta proveedor</span>
+                <span className="text-right text-gp-primary">
+                  {selectedTx.codigoRespuesta ? `[${selectedTx.codigoRespuesta}] ` : ''}
+                  {selectedTx.mensajeRespuesta || '-'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4 border-b border-slate-100 py-1.5">
+                <span className="text-gp-muted">Fecha operación</span>
+                <span className="text-gp-primary">{formatFecha(selectedTx.fechaCreacion)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-4 pt-1.5">
+                <span className="text-gp-muted">Última actualización</span>
+                <span className="text-gp-primary">{formatFecha(selectedTx.fechaActualizacion)}</span>
+              </div>
+            </div>
+
+            {selectedTx.legend && (
+              <div className="rounded-2xl border border-slate-200/80 bg-slate-50 p-3.5 text-xs leading-relaxed text-slate-600">
+                {selectedTx.legend}
+              </div>
+            )}
+
+            {liveStatus && (
+              <div className="rounded-2xl border border-sky-200 bg-sky-50 p-3.5 text-xs text-sky-950">
+                <p className="font-bold">Estatus en vivo: {liveStatus.estatus}</p>
+                <p className="mt-0.5 text-sky-800">{liveStatus.mensaje}</p>
+              </div>
+            )}
+
+            {selectedTx.upc && (
               <button
                 type="button"
-                onClick={() => setSelectedTx(null)}
-                className="rounded-xl p-1.5 text-gp-muted hover:bg-slate-100 hover:text-gp-primary"
+                disabled={checkingLive}
+                onClick={() => handleCheckLive(selectedTx.upc!)}
+                className="btn-secondary w-full"
               >
-                <X className="h-5 w-5" />
+                <RefreshCw className={`h-4 w-4 ${checkingLive ? 'animate-spin' : ''}`} />
+                Verificar estatus actual en vivo
               </button>
-            </div>
+            )}
 
-            <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5 text-sm">
-              <div className="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3">
-                <span className="text-gp-muted">Estado registrado</span>
-                <StatusBadge estatus={liveStatus?.estatus ?? selectedTx.estatus} />
-              </div>
-
-              <div className="space-y-2 rounded-2xl border border-gp-border p-4">
-                {[
-                  ['Servicio', selectedTx.servicio || `#${selectedTx.idServicio}`],
-                  ['Producto', selectedTx.producto || `#${selectedTx.idProducto}`],
-                  ['Referencia / Teléfono', selectedTx.referencia || selectedTx.telefono || '-'],
-                  ['Importe pagado', formatMxn(selectedTx.monto)],
-                  ['Comisión', formatMxn(selectedTx.comision ?? 0)],
-                  ['UPC', selectedTx.upc || '-'],
-                  ['Número de autorización', selectedTx.numAutorizacion || 'Pendiente / Sin folio'],
-                  ['ID Tx GestoPago', selectedTx.idTxGestoPago || '-'],
-                  ['Código respuesta', selectedTx.codigoRespuesta || '-'],
-                  ['Mensaje proveedor', selectedTx.mensajeRespuesta || '-'],
-                  ['Fecha operación', formatFecha(selectedTx.fechaCreacion)],
-                  ['Última actualización', formatFecha(selectedTx.fechaActualizacion)],
-                ].map(([label, value]) => (
-                  <div key={label} className="flex justify-between gap-4 border-b border-slate-100 py-1.5 last:border-0">
-                    <span className="text-gp-muted">{label}</span>
-                    <span className="text-right font-medium text-gp-primary">{value}</span>
-                  </div>
-                ))}
-              </div>
-
-              {selectedTx.legend && (
-                <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
-                  {selectedTx.legend}
+            {(selectedTx.estatus ?? '').toUpperCase() === 'EXITOSA' && (
+              <form
+                noValidate
+                onSubmit={(e) => void handleResendEmail(e, selectedTx)}
+                className="rounded-2xl border border-gp-border bg-slate-50/60 p-4"
+              >
+                <label htmlFor="tx-resend-email" className="input-label">
+                  Reenviar comprobante digital por correo
+                </label>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <input
+                    id="tx-resend-email"
+                    type="email"
+                    className={`input-field flex-1 ${emailDestError ? 'input-field-error' : ''}`}
+                    value={emailDest}
+                    onChange={(e) => {
+                      setEmailDest(e.target.value);
+                      if (emailDestError) setEmailDestError(null);
+                      if (emailSentMsg) setEmailSentMsg(null);
+                    }}
+                    placeholder="correo@ejemplo.com"
+                  />
+                  <button type="submit" disabled={sendingEmail} className="btn-primary shrink-0">
+                    {sendingEmail ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Mail className="h-4 w-4" />
+                    )}
+                    Enviar
+                  </button>
                 </div>
-              )}
-
-              {liveStatus && (
-                <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900">
-                  <p className="font-semibold">Estatus actualizado en tiempo real: {liveStatus.estatus}</p>
-                  <p className="mt-0.5">{liveStatus.mensaje}</p>
-                </div>
-              )}
-
-              {selectedTx.upc && (
-                <button
-                  type="button"
-                  disabled={checkingLive}
-                  onClick={() => handleCheckLive(selectedTx.upc!)}
-                  className="btn-secondary w-full"
-                >
-                  <RefreshCw className={`h-4 w-4 ${checkingLive ? 'animate-spin' : ''}`} />
-                  Consultar estatus actual (GET /pagos/estatus/{selectedTx.upc})
-                </button>
-              )}
-
-              {(selectedTx.estatus ?? '').toUpperCase() === 'EXITOSA' && (
-                <div className="rounded-2xl border border-gp-border p-4">
-                  <p className="mb-2 text-xs font-bold uppercase tracking-wide text-gp-muted">
-                    Reenviar comprobante digital por correo
+                <FieldError message={emailDestError} />
+                {emailSentMsg && (
+                  <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    <span>{emailSentMsg}</span>
                   </p>
-                  <div className="flex flex-col gap-2 sm:flex-row">
-                    <input
-                      type="email"
-                      className="input-field flex-1"
-                      value={emailDest}
-                      onChange={(e) => setEmailDest(e.target.value)}
-                      placeholder="correo@ejemplo.com"
-                    />
-                    <button
-                      type="button"
-                      disabled={sendingEmail}
-                      onClick={() => handleResendEmail(selectedTx)}
-                      className="btn-primary shrink-0"
-                    >
-                      {sendingEmail ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Mail className="h-4 w-4" />
-                      )}
-                      Enviar
-                    </button>
-                  </div>
-                  {emailFeedback && (
-                    <p className="mt-2 text-xs text-gp-secondary">{emailFeedback}</p>
-                  )}
-                </div>
-              )}
-            </div>
+                )}
+              </form>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </ModalShell>
     </div>
   );
 };

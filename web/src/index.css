@@ -4,24 +4,73 @@
 
 @layer base {
   body {
-    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background-color: #f1f5f9;
-    color: #0f172a;
+    @apply font-sans bg-gp-bg text-gp-primary;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-display tracking-tight;
+  }
+
+  /* Subtle custom scrollbar for modals & tables */
+  ::-webkit-scrollbar {
+    width: 7px;
+    height: 7px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-300/80 hover:bg-slate-400;
   }
 }
 
-.input-field {
-  @apply w-full rounded-xl border border-gp-border bg-white px-3.5 py-2.5 text-sm text-gp-primary placeholder-gp-muted transition focus:border-gp-secondary focus:outline-none focus:ring-2 focus:ring-gp-secondary/20 disabled:bg-slate-100 disabled:text-gp-muted;
+@layer components {
+  .input-label {
+    @apply mb-1.5 block text-xs font-semibold tracking-wide text-slate-600;
+  }
+
+  .input-field {
+    @apply w-full rounded-xl border border-gp-border bg-white px-3.5 py-2.5 text-sm text-gp-primary placeholder-slate-400 shadow-sm transition duration-150 focus:border-gp-secondary focus:outline-none focus:ring-4 focus:ring-gp-secondary/20 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-gp-muted;
+  }
+
+  .input-field-error {
+    @apply border-rose-400 bg-rose-50/30 focus:border-rose-500 focus:ring-rose-500/20;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-gp-primary px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-slate-900/10 transition duration-150 hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gp-secondary/25 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .btn-accent {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-gp-secondary px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-sky-900/20 transition duration-150 hover:bg-sky-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sky-500/25 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-gp-border bg-white px-4 py-2.5 text-sm font-semibold text-gp-primary shadow-sm transition duration-150 hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-300/40 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .btn-danger-soft {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50/60 px-4 py-2.5 text-sm font-semibold text-rose-700 transition duration-150 hover:border-rose-300 hover:bg-rose-100/70 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-rose-500/20 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .card-surface {
+    @apply rounded-2xl border border-gp-border/90 bg-white shadow-card;
+  }
+
+  .card-interactive {
+    @apply rounded-2xl border border-gp-border/90 bg-white shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-sky-300/80 hover:shadow-elevated;
+  }
 }
 
-.btn-primary {
-  @apply inline-flex items-center justify-center gap-2 rounded-xl bg-gp-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50;
-}
-
-.btn-secondary {
-  @apply inline-flex items-center justify-center gap-2 rounded-xl border border-gp-border bg-white px-4 py-2.5 text-sm font-semibold text-gp-primary transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50;
-}
-
-.card-surface {
-  @apply rounded-2xl border border-gp-border bg-white shadow-sm;
+@layer utilities {
+  .bg-grid-dark {
+    background-image: radial-gradient(rgba(148, 163, 184, 0.14) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
 }
