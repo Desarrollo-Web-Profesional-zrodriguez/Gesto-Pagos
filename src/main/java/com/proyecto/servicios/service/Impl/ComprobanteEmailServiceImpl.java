@@ -14,6 +14,7 @@ import com.proyecto.servicios.model.email.BrevoSendEmailResponse;
 import com.proyecto.servicios.model.email.ComprobanteEmailResult;
 import com.proyecto.servicios.model.email.ComprobantePagoEmailDto;
 import com.proyecto.servicios.service.ComprobanteEmailService;
+import com.proyecto.servicios.util.EmailTemplateBuilder;
 import com.proyecto.servicios.util.LogoServicioResolver;
 
 import feign.FeignException;
@@ -33,7 +34,7 @@ public class ComprobanteEmailServiceImpl implements ComprobanteEmailService {
     @Value("${brevo.api.key}")
     private String brevoApiKey;
 
-    @Value("${brevo.sender.name:Comprobante de Pago Digital}")
+    @Value("${brevo.sender.name:GestoPagos · Comprobantes}")
     private String senderName;
 
     @Value("${brevo.sender.email:zahir.rodriguez.per@gmail.com}")
@@ -51,14 +52,14 @@ public class ComprobanteEmailServiceImpl implements ComprobanteEmailService {
                     .build();
         }
 
-        // Asegurar que el logo este resuelto
         if (dto.getLogoUrl() == null || dto.getLogoUrl().trim().isEmpty()) {
             dto.setLogoUrl(logoServicioResolver.resolverUrlLogo(dto.getServicio(), dto.getProducto(), dto.getIdServicio(), dto.getIdProducto()));
         }
 
         String htmlContent = generarHtmlComprobante(dto);
-        String subject = String.format("Comprobante de Pago Exitoso - %s (Aut: %s)",
+        String subject = String.format("Comprobante GestoPagos · %s ($%s MXN · Aut: %s)",
                 dto.getServicio() != null ? dto.getServicio() : "Servicio",
+                formatearMonto(dto.getMontoPagado()),
                 dto.getNumAutorizacion() != null ? dto.getNumAutorizacion() : "N/A");
 
         BrevoSendEmailRequest request = BrevoSendEmailRequest.builder()
@@ -116,16 +117,28 @@ public class ComprobanteEmailServiceImpl implements ComprobanteEmailService {
 
     @Override
     public String generarHtmlComprobante(ComprobantePagoEmailDto dto) {
-        String logoUrl = resolverLogoUrl(dto.getLogoUrl());
+        String logoUrl = EmailTemplateBuilder.escapeHtml(resolverLogoUrl(dto.getLogoUrl()));
+        String servicio = EmailTemplateBuilder.escapeHtml(dto.getServicio() != null ? dto.getServicio() : "N/A");
+        String producto = EmailTemplateBuilder.escapeHtml(dto.getProducto() != null ? dto.getProducto() : "N/A");
+        String titular = EmailTemplateBuilder.escapeHtml(
+                dto.getDestinatarioNombre() != null && !dto.getDestinatarioNombre().isBlank()
+                        ? dto.getDestinatarioNombre()
+                        : "Estimado Cliente");
         String montoFormateado = formatearMonto(dto.getMontoPagado());
         String comisionFormateada = formatearComision(dto.getComision());
-        String cuentaEnmascarada = enmascararCuenta(dto.getNumCuenta());
-        String fecha = dto.getFechaProveedor() != null ? dto.getFechaProveedor() : dto.getHoraLocal();
+        String cuentaEnmascarada = EmailTemplateBuilder.escapeHtml(enmascararCuenta(dto.getNumCuenta()));
+        String fechaRaw = dto.getFechaProveedor() != null ? dto.getFechaProveedor() : dto.getHoraLocal();
+        String fecha = EmailTemplateBuilder.escapeHtml(fechaRaw != null ? fechaRaw : "N/A");
+        String autorizacion = EmailTemplateBuilder.escapeHtml(dto.getNumAutorizacion() != null ? dto.getNumAutorizacion() : "N/A");
+        String upc = EmailTemplateBuilder.escapeHtml(dto.getUpc() != null ? dto.getUpc() : "N/A");
+        String idTx = EmailTemplateBuilder.escapeHtml(dto.getIdTx() != null ? dto.getIdTx() : "N/A");
 
         boolean esTelefonico = esServicioTelefonico(dto.getTipoFront(), dto.getServicio(), dto.getProducto());
         String filasIdentificador = construirFilasIdentificador(dto, esTelefonico);
         String filaComision = construirFilaComision(comisionFormateada);
+        String seccionPin = construirSeccionPin(dto.getPin());
         String seccionLegend = construirSeccionLegend(dto.getLegend());
+        String preheader = "Pago exitoso de " + servicio + " por $" + montoFormateado + " MXN · Aut: " + autorizacion;
 
         return """
             <!DOCTYPE html>
@@ -133,96 +146,148 @@ public class ComprobanteEmailServiceImpl implements ComprobanteEmailService {
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Comprobante de Pago Digital</title>
+                <title>Comprobante de Pago Digital · GestoPagos</title>
             </head>
-            <body style="margin: 0; padding: 20px; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-                <table width="100%%" border="0" cellspacing="0" cellpadding="0" style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);">
-                    <!-- Encabezado con degradado moderno -->
+            <body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+                <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">%s</div>
+                <table role="presentation" width="100%%" border="0" cellspacing="0" cellpadding="0" style="background-color:#f1f5f9;padding:28px 12px;">
                     <tr>
-                        <td style="background: linear-gradient(135deg, #1e293b 0%%, #0f172a 100%%); padding: 32px 24px; text-align: center;">
-                            <div style="background-color: #ffffff; width: 72px; height: 72px; margin: 0 auto 16px auto; border-radius: 14px; padding: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center;">
-                                <img src="%s" alt="%s" style="max-width: 56px; max-height: 56px; object-fit: contain; vertical-align: middle;" />
-                            </div>
-                            <h1 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 700; letter-spacing: -0.5px;">Comprobante de Pago</h1>
-                            <p style="margin: 6px 0 0 0; color: #94a3b8; font-size: 13px;">Transaccion aplicada exitosamente</p>
-                            <div style="margin-top: 14px; display: inline-block; background-color: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; color: #34d399; font-size: 12px; font-weight: 700; padding: 4px 14px; border-radius: 20px;">
-                                &#10003; PAGO EXITOSO
-                            </div>
-                        </td>
-                    </tr>
+                        <td align="center">
+                            <table role="presentation" width="100%%" border="0" cellspacing="0" cellpadding="0" style="max-width:600px;background-color:#ffffff;border-radius:22px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 12px 32px rgba(15,23,42,0.08);">
+                                <!-- Encabezado Bancario -->
+                                <tr>
+                                    <td style="background:linear-gradient(135deg,#0f172a 0%%,#0c4a6e 100%%);padding:28px 24px 26px 24px;text-align:center;">
+                                        <div style="font-size:20px;font-weight:800;letter-spacing:-0.5px;color:#ffffff;margin-bottom:16px;">
+                                            Gesto<span style="color:#38bdf8;">Pagos</span>
+                                        </div>
+                                        <table role="presentation" border="0" cellspacing="0" cellpadding="0" align="center" style="margin:0 auto 14px auto;">
+                                            <tr>
+                                                <td align="center" valign="middle" style="width:72px;height:72px;background-color:#ffffff;border-radius:16px;padding:8px;box-shadow:0 6px 16px rgba(0,0,0,0.2);">
+                                                    <img src="%s" alt="%s" style="max-width:56px;max-height:56px;display:block;margin:0 auto;border:0;" />
+                                                </td>
+                                            </tr>
+                                        </table>
+                                        <div style="display:inline-block;background-color:rgba(16,185,129,0.22);border:1px solid rgba(52,211,153,0.55);color:#6ee7b7;font-size:11px;font-weight:700;letter-spacing:0.8px;padding:5px 14px;border-radius:999px;">
+                                            &#10003; PAGO EXITOSO
+                                        </div>
+                                        <h1 style="margin:12px 0 4px 0;color:#ffffff;font-size:22px;font-weight:700;letter-spacing:-0.3px;">
+                                            Comprobante Digital de Operaci&oacute;n
+                                        </h1>
+                                        <p style="margin:0;color:#cbd5e1;font-size:13px;">
+                                            Hola, <strong>%s</strong> &middot; Tu pago fue aplicado y verificado
+                                        </p>
+                                    </td>
+                                </tr>
 
-                    <!-- Contenedor del Monto Principal -->
-                    <tr>
-                        <td style="padding: 24px; text-align: center; background-color: #f8fafc; border-bottom: 1px solid #e2e8f0;">
-                            <span style="color: #64748b; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Monto Total Pagado</span>
-                            <div style="color: #0f172a; font-size: 36px; font-weight: 800; margin: 6px 0;">$%s <span style="font-size: 18px; font-weight: 600; color: #64748b;">MXN</span></div>
-                            <span style="color: #059669; font-size: 13px; font-weight: 600;">Cargo aplicado a cuenta %s</span>
-                        </td>
-                    </tr>
+                                <!-- Ticket de Importe Principal con Línea Punteada -->
+                                <tr>
+                                    <td style="padding:26px 24px;text-align:center;background-color:#f8fafc;border-bottom:2px dashed #cbd5e1;">
+                                        <div style="color:#64748b;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;">
+                                            Importe Total Aplicado
+                                        </div>
+                                        <div style="color:#0f172a;font-size:38px;font-weight:800;letter-spacing:-1px;margin:8px 0;">
+                                            $%s <span style="font-size:16px;font-weight:700;color:#64748b;">MXN</span>
+                                        </div>
+                                        <div style="display:inline-block;background-color:#ecfdf5;border:1px solid #a7f3d0;color:#047857;font-size:12px;font-weight:700;padding:4px 12px;border-radius:999px;">
+                                            Cuenta cargo: %s
+                                        </div>
+                                    </td>
+                                </tr>
 
-                    <!-- Detalle de la Transacción -->
-                    <tr>
-                        <td style="padding: 24px;">
-                            <h3 style="margin: 0 0 16px 0; color: #1e293b; font-size: 15px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px;">
-                                Detalle de la Operacion
-                            </h3>
-                            <table width="100%%" border="0" cellspacing="0" cellpadding="0">
+                                <!-- Franja Destacada de Folios (Autorización + UPC) -->
                                 <tr>
-                                    <td style="padding: 10px 0; color: #64748b; font-size: 14px; border-bottom: 1px solid #f1f5f9;">Numero de Autorizacion:</td>
-                                    <td style="padding: 10px 0; color: #0284c7; font-size: 15px; font-weight: 800; text-align: right; border-bottom: 1px solid #f1f5f9;">%s</td>
+                                    <td style="padding:20px 24px 0 24px;">
+                                        <table role="presentation" width="100%%" border="0" cellspacing="0" cellpadding="0" style="background-color:#f0f9ff;border:1px solid #bae6fd;border-radius:14px;">
+                                            <tr>
+                                                <td width="50%%" style="padding:12px 14px;border-right:1px solid #bae6fd;">
+                                                    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:#0369a1;">
+                                                        Numero de Autorizacion:
+                                                    </div>
+                                                    <div style="margin-top:3px;font-family:'Courier New',Courier,monospace;font-size:15px;font-weight:800;color:#0f172a;">
+                                                        %s
+                                                    </div>
+                                                </td>
+                                                <td width="50%%" style="padding:12px 14px;">
+                                                    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:#0369a1;">
+                                                        Folio UPC
+                                                    </div>
+                                                    <div style="margin-top:3px;font-family:'Courier New',Courier,monospace;font-size:15px;font-weight:800;color:#0f172a;">
+                                                        %s
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
                                 </tr>
+
+                                <!-- Detalle de la Transacción -->
                                 <tr>
-                                    <td style="padding: 10px 0; color: #64748b; font-size: 14px; border-bottom: 1px solid #f1f5f9;">Servicio:</td>
-                                    <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 700; text-align: right; border-bottom: 1px solid #f1f5f9;">%s</td>
+                                    <td style="padding:22px 24px 26px 24px;">
+                                        %s
+                                        <h3 style="margin:0 0 12px 0;color:#0f172a;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:0.8px;border-bottom:1px solid #e2e8f0;padding-bottom:8px;">
+                                            Desglose del Comprobante
+                                        </h3>
+                                        <table role="presentation" width="100%%" border="0" cellspacing="0" cellpadding="0">
+                                            <tr>
+                                                <td style="padding:10px 0;color:#64748b;font-size:13px;border-bottom:1px solid #f1f5f9;">Servicio:</td>
+                                                <td style="padding:10px 0;color:#0f172a;font-size:13px;font-weight:700;text-align:right;border-bottom:1px solid #f1f5f9;">%s</td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:10px 0;color:#64748b;font-size:13px;border-bottom:1px solid #f1f5f9;">Producto:</td>
+                                                <td style="padding:10px 0;color:#0f172a;font-size:13px;font-weight:600;text-align:right;border-bottom:1px solid #f1f5f9;">%s</td>
+                                            </tr>
+                                            %s
+                                            %s
+                                            <tr>
+                                                <td style="padding:10px 0;color:#64748b;font-size:13px;border-bottom:1px solid #f1f5f9;">Fecha y Hora:</td>
+                                                <td style="padding:10px 0;color:#0f172a;font-size:13px;font-weight:600;text-align:right;border-bottom:1px solid #f1f5f9;">%s</td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding:10px 0;color:#64748b;font-size:13px;">ID Transaccion Proveedor:</td>
+                                                <td style="padding:10px 0;color:#475569;font-size:12px;font-family:'Courier New',Courier,monospace;font-weight:700;text-align:right;">%s</td>
+                                            </tr>
+                                        </table>
+
+                                        %s
+                                    </td>
                                 </tr>
+
+                                <!-- Pie de Página -->
                                 <tr>
-                                    <td style="padding: 10px 0; color: #64748b; font-size: 14px; border-bottom: 1px solid #f1f5f9;">Producto:</td>
-                                    <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 600; text-align: right; border-bottom: 1px solid #f1f5f9;">%s</td>
-                                </tr>
-                                %s
-                                %s
-                                <tr>
-                                    <td style="padding: 10px 0; color: #64748b; font-size: 14px; border-bottom: 1px solid #f1f5f9;">Fecha y Hora:</td>
-                                    <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 600; text-align: right; border-bottom: 1px solid #f1f5f9;">%s</td>
-                                </tr>
-                                <tr>
-                                    <td style="padding: 10px 0; color: #64748b; font-size: 14px; border-bottom: 1px solid #f1f5f9;">Folio UPC:</td>
-                                    <td style="padding: 10px 0; color: #475569; font-size: 13px; font-family: monospace; font-weight: 600; text-align: right; border-bottom: 1px solid #f1f5f9;">%s</td>
-                                </tr>
-                                <tr>
-                                    <td style="padding: 10px 0; color: #64748b; font-size: 14px;">ID Transaccion (Proveedor):</td>
-                                    <td style="padding: 10px 0; color: #475569; font-size: 13px; font-family: monospace; font-weight: 600; text-align: right;">%s</td>
+                                    <td style="background-color:#0f172a;padding:20px 24px;text-align:center;">
+                                        <p style="margin:0 0 6px 0;color:#e2e8f0;font-size:12px;font-weight:700;">
+                                            GestoPagos &middot; Comprobante Digital Verificado
+                                        </p>
+                                        <p style="margin:0 0 6px 0;color:#94a3b8;font-size:11px;line-height:1.5;">
+                                            Operaci&oacute;n protegida con autenticaci&oacute;n 2FA y cifrado transaccional AES-256.
+                                        </p>
+                                        <p style="margin:0;color:#64748b;font-size:11px;line-height:1.5;">
+                                            Conserva este folio UPC y n&uacute;mero de autorizaci&oacute;n para cualquier aclaraci&oacute;n con el proveedor del servicio.
+                                        </p>
+                                    </td>
                                 </tr>
                             </table>
-
-                            %s
-                        </td>
-                    </tr>
-
-                    <!-- Pie de Pagina -->
-                    <tr>
-                        <td style="background-color: #0f172a; padding: 20px 24px; text-align: center; color: #94a3b8; font-size: 12px; line-height: 1.6;">
-                            <p style="margin: 0 0 6px 0; color: #cbd5e1; font-weight: 600;">Comprobante Digital Oficial con Validez Legal</p>
-                            <p style="margin: 0 0 6px 0;">Este correo es una notificacion automatica de tu pago electronico a traves de Brevo.</p>
-                            <p style="margin: 0; color: #64748b;">Conserva este comprobante para cualquier duda o aclaracion con el proveedor del servicio.</p>
                         </td>
                     </tr>
                 </table>
             </body>
             </html>
-        """.formatted(
+            """.formatted(
+                preheader,
                 logoUrl,
-                dto.getServicio() != null ? dto.getServicio() : "Servicio",
+                servicio,
+                titular,
                 montoFormateado,
                 cuentaEnmascarada,
-                dto.getNumAutorizacion() != null ? dto.getNumAutorizacion() : "N/A",
-                dto.getServicio() != null ? dto.getServicio() : "N/A",
-                dto.getProducto() != null ? dto.getProducto() : "N/A",
+                autorizacion,
+                upc,
+                seccionPin,
+                servicio,
+                producto,
                 filasIdentificador,
                 filaComision,
-                fecha != null ? fecha : "N/A",
-                dto.getUpc() != null ? dto.getUpc() : "N/A",
-                dto.getIdTx() != null ? dto.getIdTx() : "N/A",
+                fecha,
+                idTx,
                 seccionLegend
         );
     }
@@ -269,38 +334,41 @@ public class ComprobanteEmailServiceImpl implements ComprobanteEmailService {
 
     private String construirFilasIdentificador(ComprobantePagoEmailDto dto, boolean esTelefonico) {
         StringBuilder filas = new StringBuilder();
+        String tel = EmailTemplateBuilder.escapeHtml(dto.getTelefono() != null ? dto.getTelefono() : "No especificado");
+        String ref = EmailTemplateBuilder.escapeHtml(dto.getReferencia() != null ? dto.getReferencia() : "No especificada");
+
         if (esTelefonico) {
             filas.append("""
                 <tr>
-                    <td style="padding: 10px 0; color: #64748b; font-size: 14px; border-bottom: 1px solid #f1f5f9;">Numero de Telefono:</td>
-                    <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 700; text-align: right; border-bottom: 1px solid #f1f5f9;">%s</td>
+                    <td style="padding:10px 0;color:#64748b;font-size:13px;border-bottom:1px solid #f1f5f9;">Numero de Telefono:</td>
+                    <td style="padding:10px 0;color:#0f172a;font-size:13px;font-family:'Courier New',Courier,monospace;font-weight:700;text-align:right;border-bottom:1px solid #f1f5f9;">%s</td>
                 </tr>
-            """.formatted(dto.getTelefono() != null ? dto.getTelefono() : "No especificado"));
+            """.formatted(tel));
 
             if (dto.getReferencia() != null && !dto.getReferencia().trim().isEmpty()
                     && !dto.getReferencia().equals(dto.getTelefono()) && !"0".equals(dto.getReferencia())) {
                 filas.append("""
                     <tr>
-                        <td style="padding: 10px 0; color: #64748b; font-size: 14px; border-bottom: 1px solid #f1f5f9;">Folio / Referencia:</td>
-                        <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 600; text-align: right; border-bottom: 1px solid #f1f5f9;">%s</td>
+                        <td style="padding:10px 0;color:#64748b;font-size:13px;border-bottom:1px solid #f1f5f9;">Folio / Referencia:</td>
+                        <td style="padding:10px 0;color:#0f172a;font-size:13px;font-family:'Courier New',Courier,monospace;font-weight:600;text-align:right;border-bottom:1px solid #f1f5f9;">%s</td>
                     </tr>
-                """.formatted(dto.getReferencia()));
+                """.formatted(ref));
             }
         } else {
             filas.append("""
                 <tr>
-                    <td style="padding: 10px 0; color: #64748b; font-size: 14px; border-bottom: 1px solid #f1f5f9;">Referencia de Pago:</td>
-                    <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 700; text-align: right; border-bottom: 1px solid #f1f5f9;">%s</td>
+                    <td style="padding:10px 0;color:#64748b;font-size:13px;border-bottom:1px solid #f1f5f9;">Referencia de Pago:</td>
+                    <td style="padding:10px 0;color:#0f172a;font-size:13px;font-family:'Courier New',Courier,monospace;font-weight:700;text-align:right;border-bottom:1px solid #f1f5f9;">%s</td>
                 </tr>
-            """.formatted(dto.getReferencia() != null ? dto.getReferencia() : "No especificada"));
+            """.formatted(ref));
 
             if (dto.getTelefono() != null && !dto.getTelefono().trim().isEmpty() && !"0".equals(dto.getTelefono())) {
                 filas.append("""
                     <tr>
-                        <td style="padding: 10px 0; color: #64748b; font-size: 14px; border-bottom: 1px solid #f1f5f9;">Telefono Asociado:</td>
-                        <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 600; text-align: right; border-bottom: 1px solid #f1f5f9;">%s</td>
+                        <td style="padding:10px 0;color:#64748b;font-size:13px;border-bottom:1px solid #f1f5f9;">Telefono Asociado:</td>
+                        <td style="padding:10px 0;color:#0f172a;font-size:13px;font-family:'Courier New',Courier,monospace;font-weight:600;text-align:right;border-bottom:1px solid #f1f5f9;">%s</td>
                     </tr>
-                """.formatted(dto.getTelefono()));
+                """.formatted(tel));
             }
         }
         return filas.toString();
@@ -312,10 +380,30 @@ public class ComprobanteEmailServiceImpl implements ComprobanteEmailService {
         }
         return """
             <tr>
-                <td style="padding: 10px 0; color: #64748b; font-size: 14px; border-bottom: 1px solid #f1f5f9;">Comision de Servicio:</td>
-                <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 600; text-align: right; border-bottom: 1px solid #f1f5f9;">$%s MXN</td>
+                <td style="padding:10px 0;color:#64748b;font-size:13px;border-bottom:1px solid #f1f5f9;">Comision de Servicio:</td>
+                <td style="padding:10px 0;color:#0f172a;font-size:13px;font-weight:600;text-align:right;border-bottom:1px solid #f1f5f9;">$%s MXN</td>
             </tr>
         """.formatted(comisionFormateada);
+    }
+
+    private String construirSeccionPin(String pin) {
+        if (pin == null || pin.trim().isEmpty()) {
+            return "";
+        }
+        return """
+            <table role="presentation" width="100%%" border="0" cellspacing="0" cellpadding="0" style="margin-bottom:18px;background-color:#fffbeb;border:1px solid #fcd34d;border-radius:12px;">
+                <tr>
+                    <td style="padding:14px 16px;text-align:center;">
+                        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#92400e;">
+                            PIN / C&oacute;digo Electr&oacute;nico Adquirido
+                        </div>
+                        <div style="margin-top:6px;font-family:'Courier New',Courier,monospace;font-size:20px;font-weight:800;letter-spacing:2px;color:#78350f;">
+                            %s
+                        </div>
+                    </td>
+                </tr>
+            </table>
+        """.formatted(EmailTemplateBuilder.escapeHtml(pin.trim()));
     }
 
     private String construirSeccionLegend(String legend) {
@@ -323,10 +411,10 @@ public class ComprobanteEmailServiceImpl implements ComprobanteEmailService {
             return "";
         }
         return """
-            <div style="margin-top: 24px; padding: 16px; background-color: #f8fafc; border-left: 4px solid #3b82f6; border-radius: 6px;">
-                <p style="margin: 0 0 6px 0; color: #1e293b; font-size: 13px; font-weight: 700;">Aclaraciones y Soporte:</p>
-                <p style="margin: 0; color: #475569; font-size: 12px; line-height: 1.5;">%s</p>
+            <div style="margin-top:20px;padding:14px 16px;background-color:#f8fafc;border-left:4px solid #0284c7;border-radius:8px;">
+                <p style="margin:0 0 4px 0;color:#0f172a;font-size:12px;font-weight:700;">Instrucciones y Aclaraciones del Proveedor:</p>
+                <p style="margin:0;color:#475569;font-size:12px;line-height:1.5;">%s</p>
             </div>
-        """.formatted(legend);
+        """.formatted(EmailTemplateBuilder.escapeHtml(legend));
     }
 }

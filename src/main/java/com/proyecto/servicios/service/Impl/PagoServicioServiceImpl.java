@@ -416,6 +416,7 @@ public class PagoServicioServiceImpl implements PagoServicioService {
                 .referencia(referencia)
                 .montoPagado(montoPago)
                 .comision(comisionProveedor)
+                .pin(pin != null && !pin.trim().isEmpty() ? pin.trim() : null)
                 .legend(legend)
                 .fechaProveedor(xml.getFecha())
                 .horaLocal(horaLocal)

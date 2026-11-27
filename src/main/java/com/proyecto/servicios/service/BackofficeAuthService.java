@@ -17,6 +17,7 @@ import com.proyecto.servicios.exception.AutenticacionException;
 import com.proyecto.servicios.exception.CatalogoCodigoError;
 import com.proyecto.servicios.model.email.BrevoEmailContact;
 import com.proyecto.servicios.model.email.BrevoSendEmailRequest;
+import com.proyecto.servicios.util.EmailTemplateBuilder;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -46,7 +47,7 @@ public class BackofficeAuthService {
     @Value("${brevo.api.key:}")
     private String brevoApiKey;
 
-    @Value("${brevo.sender.name:GestoPagos Seguridad Backoffice}")
+    @Value("${brevo.sender.security-name:GestoPagos · Seguridad}")
     private String senderName;
 
     @Value("${brevo.sender.email:zahir.rodriguez.per@gmail.com}")
@@ -211,19 +212,21 @@ public class BackofficeAuthService {
             log.warn("[BackofficeAuth]: BREVO_API_KEY no configurada; no se envió correo OTP.");
             return false;
         }
-        String html = "<div style='font-family:Inter,Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;border:1px solid #e2e8f0;border-radius:16px;'>"
-                + "<h2 style='color:#0f172a;margin:0 0 8px;'>Verificación en 2 pasos — Consola Backoffice</h2>"
-                + "<p style='color:#475569;font-size:14px;line-height:1.5;'>Usa el siguiente código de 6 dígitos para confirmar tu ingreso a la Consola Backoffice de GestoPagos:</p>"
-                + "<div style='margin:24px 0;padding:18px;text-align:center;background:#f1f5f9;border-radius:12px;'>"
-                + "<span style='font-size:32px;font-weight:800;letter-spacing:8px;color:#0f172a;font-family:monospace;'>"
-                + codigoOtp + "</span></div>"
-                + "<p style='color:#64748b;font-size:12px;margin:0;'>Este código expira en 5 minutos. Si no solicitaste este acceso, ignora este mensaje.</p>"
-                + "</div>";
+        String html = EmailTemplateBuilder.construirHtmlCodigoOtp(
+                "Consola Backoffice · 2FA",
+                "Autorización de Acceso Administrativo",
+                "Hola, Administrador",
+                "Detectamos un inicio de sesión en la Consola Operativa Backoffice de GestoPagos. Ingresa este código de 6 dígitos para confirmar tu identidad:",
+                codigoOtp,
+                5,
+                "Si no reconoces este intento de acceso, te recomendamos revisar las credenciales administrativas de inmediato e ignorar este mensaje.",
+                true
+        );
 
         BrevoSendEmailRequest req = BrevoSendEmailRequest.builder()
                 .sender(BrevoEmailContact.builder().name(senderName).email(senderEmail).build())
                 .to(List.of(BrevoEmailContact.builder().name("Administrador Backoffice").email(destinatario).build()))
-                .subject("Código de acceso Consola Backoffice: " + codigoOtp)
+                .subject("GestoPagos Seguridad · Código Backoffice: " + codigoOtp)
                 .htmlContent(html)
                 .build();
         try {
